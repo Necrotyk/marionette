@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Marionette Companion</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --panel-bg: #3D3D3D;
+            --window-bg: #2E2E2E;
+            --text-color: #E0E0E0;
+            --input-bg: #1E1E1E;
+            --border-color: #555;
+            --highlight-color: #0078D4;
+            --highlight-text: #FFFFFF;
+            --danger-color: #c62828;
+        }
+        body {
+            font-family: 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            font-size: 14px;
+            width: 350px;
+            padding: 15px;
+            background-color: var(--window-bg);
+            color: var(--text-color);
+            overflow: hidden;
+        }
+        h3 {
+            margin-top: 0;
+            text-align: center;
+            font-weight: bold;
+        }
+        .form-group {
+            margin-bottom: 12px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="password"], select {
+            width: 100%;
+            padding: 8px;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+            color: var(--text-color);
+            font-family: inherit;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--highlight-text);
+            background-color: var(--highlight-color);
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: bold;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        button:hover { 
+            filter: brightness(1.1);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        #disconnect-btn { background-color: var(--danger-color); }
+        .status { text-align: center; padding: 8px; border-radius: 4px; font-weight: bold; margin-top: 15px; border: 1px solid transparent; }
+        .status.disconnected { background-color: rgba(198, 40, 40, 0.2); border-color: var(--danger-color); color: var(--danger-color); }
+        .status.connecting { background-color: rgba(245, 124, 0, 0.2); border-color: #f57c00; color: #f57c00; }
+        .status.connected { background-color: rgba(46, 125, 50, 0.2); border-color: #2e7d32; color: #2e7d32; }
+        .profile-manager { display: flex; gap: 8px; margin-top: 5px; }
+        .profile-manager button { width: auto; padding: 5px 10px; font-size: 12px; }
+        #profile-form-modal { 
+            display: none; 
+            position: fixed; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.7); 
+            z-index: 9999; /* Increased z-index */
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        #profile-form-modal.visible {
+            display: block;
+            opacity: 1;
+        }
+        #profile-form-container { 
+            background: var(--window-bg); 
+            padding: 20px; 
+            border-radius: 5px; 
+            position: absolute; 
+            top: 50%; left: 50%; 
+            transform: translate(-50%, -50%) scale(0.95);
+            width: 320px; 
+            transition: transform 0.3s ease;
+        }
+        #profile-form-modal.visible #profile-form-container {
+             transform: translate(-50%, -50%) scale(1);
+        }
+        .button-group { display: flex; gap: 10px; margin-top: 15px; }
+
+        /* Notification Area */
+        #notification-area {
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 5px;
+            z-index: 10000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        #notification-area.show {
+            opacity: 1;
+            visibility: visible;
+        }
+    </style>
+</head>
+<body>
+    <h3>Marionette Companion</h3>
+
+    <div id="main-view">
+        <div class="form-group">
+            <label for="profile-select">Connection Profile</label>
+            <select id="profile-select"></select>
+            <div class="profile-manager">
+                <button id="add-profile-btn" style="flex-grow: 1;"><i class="fa-solid fa-plus"></i> Add New</button>
+                <button id="edit-profile-btn"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
+                <button id="delete-profile-btn" style="background-color: var(--danger-color);"><i class="fa-solid fa-trash-can"></i> Delete</button>
+            </div>
+        </div>
+
+        <div id="connection-form">
+            <div class="form-group">
+                <label for="server-address">Server Address</label>
+                <input type="text" id="server-address" placeholder="wss://your-server.com:9001" readonly>
+            </div>
+            <div class="form-group">
+                <label for="auth-token">Auth Token</label>
+                <input type="password" id="auth-token" placeholder="Token from selected profile" readonly>
+            </div>
+            <button id="connect-btn"><i class="fa-solid fa-plug-circle-bolt"></i>Connect</button>
+        </div>
+        <button id="disconnect-btn" style="display:none;"><i class="fa-solid fa-plug-circle-xmark"></i>Disconnect</button>
+        <div id="status" class="status disconnected">Disconnected</div>
+    </div>
+
+    <!-- Add/Edit Profile Modal -->
+    <div id="profile-form-modal">
+        <div id="profile-form-container">
+            <h4 id="profile-form-title">Add New Profile</h4>
+            <input type="hidden" id="editing-profile-id">
+            <div class="form-group">
+                <label for="profile-name">Profile Name</label>
+                <input type="text" id="profile-name" placeholder="e.g., Home Server">
+            </div>
+            <div class="form-group">
+                <label for="profile-address">Server Address</label>
+                <input type="text" id="profile-address" placeholder="domain.com or domain:port">
+            </div>
+            <div class="form-group">
+                <label for="profile-token">Auth Token</label>
+                <input type="password" id="profile-token" placeholder="Paste token from agent">
+            </div>
+            <div class="button-group">
+                <button id="save-profile-btn"><i class="fa-solid fa-save"></i> Save</button>
+                <button id="cancel-profile-btn" style="background-color: #555;">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="notification-area"></div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

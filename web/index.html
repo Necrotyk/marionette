@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marionette Desktop</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%231E1E1E' rx='12'/%3E%3Ctext x='50' y='58' font-size='48' font-weight='bold' fill='%2300D1D1' text-anchor='middle' dominant-baseline='middle' font-family='monospace'%3E[/]%3C/text%3E%3Ctext x='88' y='85' font-size='16' font-weight='bold' fill='%2300D1D1' text-anchor='end' font-family='monospace'%3E.cc%3C/text%3E%3Crect x='68' y='45' width='10' height='3' fill='%231E1E1E' /%3E%3Crect x='65' y='55' width='10' height='3' fill='%231E1E1E' /%3E%3C/svg%3E">
+    
+    <!-- External Libraries -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.1.0/ansi_up.min.js"></script>
+    
+    <!-- Local Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Background Canvas -->
+    <canvas id="background-canvas"></canvas>
+    
+    <!-- Desktop Selection Box -->
+    <div id="selection-box"></div>
+    
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div id="login-box">
+            <h2>Marionette Login</h2>
+            <input type="text" id="username-input" placeholder="Enter username" value="user">
+            <button id="login-button">Login</button>
+        </div>
+    </div>
+
+    <!-- Top Panel -->
+    <div id="top-panel" class="panel">
+        <div class="panel-menu-container">
+            <!-- Applications Menu -->
+            <div id="app-menu-button" class="panel-menu">Applications
+                <div id="app-menu" class="menu">
+                    <ul>
+                        <li data-app="add-webapp"><i class="fa-solid fa-plus"></i> Add Web Launcher...</li>
+                        <hr>
+                        <li data-app="terminal"><i class="fa-solid fa-terminal"></i> Terminal (Simulated)</li>
+                        <li data-app="file-browser"><i class="fa-regular fa-folder-open"></i> File Browser (Simulated)</li>
+                        <li class="has-submenu">
+                            <i class="fa-solid fa-screwdriver-wrench"></i> Utilities <i class="fa-solid fa-caret-right" style="position:absolute; right: 8px;"></i>
+                            <div class="menu submenu">
+                                <ul>
+                                    <li data-app="hashing-calculator"><i class="fa-solid fa-hashtag"></i> Hashing Calculator</li>
+                                    <li data-app="steganography-tool"><i class="fa-solid fa-user-secret"></i> Steganography Tool</li>
+                                    <li data-app="cryptool"><i class="fa-solid fa-key"></i> Cryptool</li>
+                                    <li data-app="regex-tester"><i class="fa-solid fa-magnifying-glass"></i> Regex Tester</li>
+                                </ul>
+                            </div>
+                        </li>
+                        <hr id="remote-separator" style="display: none;">
+                        <li data-app="remote-terminal" class="remote-app" style="display: none;"><i class="fa-solid fa-server"></i> Remote Terminal</li>
+                        <li data-app="remote-file-browser" class="remote-app" style="display: none;"><i class="fa-solid fa-satellite-dish"></i> Remote Files</li>
+                        <hr id="webapp-separator" style="display: none;">
+                        <ul id="webapp-list"></ul>
+                    </ul>
+                </div>
+            </div>
+            <!-- Places Menu -->
+            <div id="places-menu-button" class="panel-menu">Places
+                <div id="places-menu" class="menu">
+                    <ul>
+                        <li id="places-home"><i class="fa-solid fa-house-user"></i> Home</li>
+                        <li id="places-desktop"><i class="fa-solid fa-desktop"></i> Desktop</li>
+                        <hr id="remote-places-separator" style="display: none;">
+                        <li data-app="remote-file-browser" data-path="/" class="remote-app" style="display: none;"><i class="fa-solid fa-server"></i> Remote Home</li>
+                    </ul>
+                </div>
+            </div>
+            <!-- System Menu -->
+            <div id="system-menu-button" class="panel-menu">System
+                <div id="system-menu" class="menu">
+                    <ul>
+                        <li data-app="settings"><i class="fa-solid fa-gear"></i> System Settings</li>
+                        <hr style="border-color: #555; margin: 5px 0;">
+                        <li data-app="save-state"><i class="fa-solid fa-save"></i> Save State</li>
+                        <li data-app="load-state"><i class="fa-solid fa-upload"></i> Load State</li>
+                        <hr style="border-color: #555; margin: 5px 0;">
+                        <li data-app="logout"><i class="fa-solid fa-right-from-bracket"></i> Log Out</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <!-- System Tray -->
+        <div class="system-tray">
+            <div class="tray-icons">
+                <i class="fa-solid fa-volume-high"></i>
+                <i class="fa-solid fa-wifi"></i>
+                <i class="fa-solid fa-battery-three-quarters"></i>
+            </div>
+            <div id="clock"></div>
+        </div>
+    </div>
+    
+    <!-- Notification Center -->
+    <div id="notification-center"></div>
+
+    <!-- Main Desktop Area -->
+    <div id="desktop">
+        <div id="trash-bin"><i class="fa-solid fa-trash-can"></i></div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="context-menu" class="menu"></div>
+
+    <!-- Bottom Panel -->
+    <div id="bottom-panel" class="panel">
+        <div id="taskbar-items"></div>
+        <div id="workspace-switcher">
+            <button class="workspace-button active" data-workspace="1">1</button>
+            <button class="workspace-button" data-workspace="2">2</button>
+            <button class="workspace-button" data-workspace="3">3</button>
+            <button class="workspace-button" data-workspace="4">4</button>
+        </div>
+    </div>
+
+    <!-- Local Script -->
+    <script src="script.js"></script>
+</body>
+</html>

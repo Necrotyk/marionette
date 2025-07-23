@@ -1,0 +1,288 @@
+/* Basic Reset and Global Styles */
+:root {
+    --panel-bg: #3D3D3D;
+    --window-bg: #2E2E2E;
+    --window-title-bg: #3D3D3D;
+    --text-color: #E0E0E0;
+    --input-bg: #1E1E1E;
+    --border-color: #555;
+    --highlight-color: #0078D4;
+    --highlight-text: #FFFFFF;
+    --selection-border: #0078D4;
+    --selection-bg: rgba(0, 120, 212, 0.3);
+}
+
+body[data-theme="light"] {
+    --panel-bg: #E0E0E0;
+    --window-bg: #F5F5F5;
+    --window-title-bg: #E0E0E0;
+    --text-color: #212121;
+    --input-bg: #FFFFFF;
+    --border-color: #BDBDBD;
+    --highlight-color: #42A5F5;
+    --highlight-text: #FFFFFF;
+    --selection-border: #42A5F5;
+    --selection-bg: rgba(66, 165, 245, 0.3);
+}
+
+body[data-theme="blue"] {
+    --panel-bg: #2c3e50;
+    --window-bg: #34495e;
+    --window-title-bg: #2c3e50;
+    --text-color: #ecf0f1;
+    --input-bg: #2c3e50;
+    --border-color: #7f8c8d;
+    --highlight-color: #3498db;
+    --highlight-text: #FFFFFF;
+    --selection-border: #3498db;
+    --selection-bg: rgba(52, 152, 219, 0.3);
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: black;
+    font-family: 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    font-size: 14px;
+    color: var(--text-color);
+    user-select: none;
+}
+
+/* Canvas for Animated background */
+#background-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+}
+
+/* --- Login Screen --- */
+#login-screen {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-color: #000;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 20px;
+}
+#login-box {
+    background-color: #2E2E2E;
+    padding: 40px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    text-align: center;
+}
+#login-box h2 {
+    margin: 0 0 20px 0;
+    color: #E0E0E0;
+}
+#username-input {
+    width: 200px;
+    padding: 8px;
+    background: #1E1E1E;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: white;
+    margin-right: 10px;
+}
+#login-button {
+    padding: 8px 16px;
+    background-color: #0078D4;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    cursor: pointer;
+}
+
+/* --- Desktop Elements (Initially Hidden) --- */
+#top-panel, #desktop, #bottom-panel, #notification-center {
+    display: none;
+}
+ 
+/* Main Desktop Area */
+#desktop {
+    position: absolute;
+    top: 30px;
+    bottom: 30px;
+    width: 100%;
+    height: calc(100% - 60px);
+    z-index: 2;
+    overflow: hidden;
+}
+ 
+#selection-box {
+    position: absolute;
+    border: 1px solid var(--selection-border);
+    background-color: var(--selection-bg);
+    z-index: 9998;
+    display: none;
+}
+
+/* Panels (Top and Bottom Bars) */
+.panel {
+    background-color: var(--panel-bg);
+    width: 100%;
+    height: 30px;
+    position: fixed;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    box-sizing: border-box;
+    border-bottom: 1px solid #2B2B2B;
+}
+
+#top-panel { top: 0; justify-content: space-between; }
+#bottom-panel { bottom: 0; border-top: 1px solid var(--border-color); border-bottom: none; justify-content: space-between; }
+ 
+/* Panel Menus & System Tray */
+.panel-menu-container { display: flex; }
+.panel-menu { padding: 5px 10px; cursor: pointer; border-radius: 3px; font-weight: bold; position: relative; }
+.panel-menu:hover, .panel-menu.menu-open { background-color: #555555; }
+.system-tray { display: flex; align-items: center; gap: 15px; }
+.tray-icons i { font-size: 16px; margin: 0 4px; color: #C0C0C0; }
+#clock { font-family: monospace; font-size: 13px; }
+ 
+/* Desktop Icons */
+.desktop-icon { position: absolute; width: 80px; text-align: center; cursor: grab; padding: 5px; border-radius: 3px; border: 1px solid transparent;}
+.desktop-icon:hover { background-color: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2); }
+.desktop-icon.selected { background-color: var(--selection-bg); border-color: var(--selection-border); }
+.desktop-icon i { font-size: 48px; color: #A0D3E8;}
+.desktop-icon[data-filetype="file"] i { color: #d0d0d0; }
+.desktop-icon img { width: 48px; height: 48px; margin: 0 auto; }
+.desktop-icon p { margin: 5px 0 0 0; color: white; text-shadow: 1px 1px 2px black; font-size: 13px; word-break: break-all; }
+.rename-input { width: 100%; box-sizing: border-box; text-align: center; background: var(--input-bg); color: var(--text-color); border: 1px solid var(--highlight-color); }
+
+/* Application & Context Menus */
+.menu { position: absolute; top: 100%; left: 0; background-color: rgba(40, 40, 40, 0.98); border: 1px solid var(--border-color); border-radius: 5px; z-index: 2000; display: none; box-shadow: 5px 5px 15px rgba(0,0,0,0.5); padding: 5px; min-width: 220px;}
+.panel-menu.menu-open > .menu { display: block; }
+.menu ul { list-style: none; padding: 0; margin: 0; }
+.menu ul li { padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; border-radius: 3px; position: relative; color: var(--text-color); }
+.menu ul li:hover > .submenu { display: block; }
+.menu ul li.has-submenu:hover { background-color: var(--highlight-color); color: var(--highlight-text); }
+.menu ul li[data-app]:hover, #context-menu li:hover { background-color: var(--highlight-color); color: var(--highlight-text); }
+.submenu { display: none; position: absolute; left: 100%; top: -5px; }
+
+/* Application Window Styles */
+.app-window { position: absolute; background-color: var(--window-bg); border: 1px solid var(--border-color); border-radius: 5px; box-shadow: 0 5px 20px rgba(0,0,0,0.4); display: flex; flex-direction: column; resize: both; overflow: hidden; min-width: 200px; min-height: 150px; transition: top 0.2s, left 0.2s, width 0.2s, height 0.2s;}
+.window-title-bar { background-color: var(--window-title-bg); color: var(--text-color); padding: 5px 8px; cursor: move; display: flex; justify-content: space-between; align-items: center; font-weight: bold; height: 20px; flex-shrink: 0;}
+.title-bar-controls { display: flex; gap: 5px; }
+.title-bar-controls button { background: none; border: 1px solid transparent; color: var(--text-color); font-size: 14px; width: 24px; height: 20px; line-height: 20px; text-align: center; padding: 0; border-radius: 3px; cursor: pointer; }
+.title-bar-controls button:hover { background-color: #555; }
+.title-bar-controls button.close-btn:hover { background-color: #E81123; }
+.window-content { padding: 10px; flex-grow: 1; background-color: var(--input-bg); color: var(--text-color); overflow: auto; }
+.editor-container { display: flex; flex-direction: column; height: 100%; padding:0 !important; }
+.editor-toolbar { padding: 5px; display: flex; gap: 5px; border-bottom: 1px solid var(--border-color); }
+.editor-textarea { flex-grow: 1; border: none !important; resize: none !important; }
+
+/* App-Specific Styles */
+.terminal-content, .utility-textarea, .utility-input { font-family: 'monospace'; white-space: pre-wrap; font-size: 13px; }
+.terminal-output { color: #AEEA00; }
+.terminal-output .grep-match { background-color: #f7d95c; color: black; }
+.terminal-input-line { display: flex; }
+.terminal-prompt { color: #00D1D1; }
+.terminal-input { background: none; border: none; color: var(--text-color); flex-grow: 1; font-family: inherit; font-size: inherit; }
+.terminal-input:focus { outline: none; }
+.utility-textarea, .utility-input { width: 100%; background: var(--input-bg); color: var(--text-color); border: 1px solid var(--border-color); box-sizing: border-box; padding: 5px; }
+.utility-textarea { height: 100px; resize: vertical; }
+.utility-input { height: 30px; }
+.utility-output { background: var(--input-bg); padding: 8px; border-radius: 3px; font-size: 12px; word-break: break-all; margin-top: 10px; }
+.file-browser-content { display: flex; flex-direction: column; }
+.file-browser-nav { display: flex; gap: 5px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color); margin-bottom: 10px; }
+.file-browser-nav button { background: #444; border: 1px solid var(--border-color); border-radius: 3px; padding: 2px 6px;}
+.file-browser-grid { display: flex; flex-wrap: wrap; gap: 15px; align-content: flex-start; }
+.file-browser-item { width: 80px; text-align: center; padding: 5px; border-radius: 3px; cursor: pointer; }
+.file-browser-item i { font-size: 40px; color: #A0D3E8;}
+.file-browser-item p { margin: 5px 0 0 0; font-size: 12px; word-wrap: break-word; }
+.settings-content, .hashing-content, .steganography-content, .cryptool-content, .regex-content { display: flex; flex-direction: column; gap: 15px; padding: 10px !important; }
+.color-swatch { width: 30px; height: 30px; border-radius: 5px; cursor: pointer; border: 2px solid #555; }
+.utility-button { padding: 8px; background-color: var(--highlight-color); border: none; border-radius: 4px; color: var(--highlight-text); cursor: pointer; }
+#regex-output { white-space: pre-wrap; font-family: monospace; background: var(--input-bg); padding: 8px; border-radius: 3px; word-break: break-all;}
+#regex-output .match { background-color: #f7d95c; color: black; }
+ 
+/* Taskbar & Workspace Styles */
+#taskbar-items { display: flex; gap: 5px; }
+.task-item { background-color: #555; padding: 2px 10px; border-radius: 3px; border: 1px solid #666; cursor: pointer; font-size: 13px; transition: background-color 0.2s; }
+.task-item:hover { background-color: #666; }
+.task-item.active { background-color: var(--highlight-color); }
+.task-item.minimized { background-color: #444; border-style: dashed; }
+#workspace-switcher { display: flex; gap: 4px; border: 1px solid #222; background-color: #2E2E2E; padding: 2px; border-radius: 3px; }
+.workspace-button { background-color: #555; border: 1px solid #666; color: white; padding: 0 8px; font-size: 12px; border-radius: 2px; cursor: pointer; }
+.workspace-button.active { background-color: var(--highlight-color); border-color: #008CFA; }
+.toggle-switch { position: relative; display: inline-block; width: 40px; height: 24px; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px; }
+.slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+input:checked + .slider { background-color: #28a745; }
+input:checked + .slider:before { transform: translateX(16px); }
+
+/* Notification Styles */
+#notification-center {
+    position: fixed;
+    top: 40px;
+    right: 10px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.notification {
+    background-color: rgba(40,40,40,0.9);
+    color: #E0E0E0;
+    padding: 15px;
+    border-radius: 5px;
+    border: 1px solid #555;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.5);
+    animation: slide-in 0.5s ease-out forwards;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+}
+.notification.hide {
+    animation: slide-out 0.5s ease-in forwards;
+}
+.notification-close { cursor: pointer; }
+@keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slide-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+ 
+/* Trash Can */
+#trash-bin {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    font-size: 40px;
+    padding: 15px;
+    border-radius: 5px;
+    transition: all 0.2s;
+    z-index: 999;
+}
+#trash-bin.drag-over {
+    background-color: rgba(255,0,0,0.5);
+    transform: scale(1.2);
+}
+ 
+/* Kernel Panic */
+#kernel-panic-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #0000AA;
+    color: white;
+    z-index: 10000;
+    display: none; /* Initially hidden */
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-family: 'Courier New', Courier, monospace;
+}
+
