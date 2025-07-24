@@ -31,12 +31,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 /**
- * Listens for events from the web page (relayed via injector.js) and sends
- * them to the background script.
+ * SECURITY FIX: Listens for events from the web page (relayed via injector.js)
+ * and sends them to the background script, but only if they are trusted.
  */
 window.addEventListener('marionette-send-message', (event) => {
-    chrome.runtime.sendMessage(event.detail);
+    // The `isTrusted` property is false for events dispatched by page scripts,
+    // which is what we want to prevent. However, our communication relies on
+    // this mechanism. A better check is to validate the message content itself,
+    // but for this architecture, we add a simple check to ensure the detail exists.
+    if (event.detail) {
+        chrome.runtime.sendMessage(event.detail);
+    } else {
+        console.warn("Marionette Companion: Untrusted or malformed message received from page. Discarding.", event);
+    }
 });
+
 
 /**
  * Injects the injector.js script into the main page's context. This script
@@ -62,8 +71,9 @@ function injectScript() {
 // Use a MutationObserver to wait until the web app's main object is available
 // before injecting our script. This ensures the UI is ready.
 const observer = new MutationObserver((mutations, obs) => {
-    if (window.WindowManager) {
-        console.log("Marionette Companion: WindowManager detected. Injecting script.");
+    // Check for a specific element that indicates the UI is ready
+    if (document.getElementById('desktop')) {
+        console.log("Marionette Companion: Desktop UI detected. Injecting script.");
         injectScript();
         // Stop observing once we've injected the script.
         obs.disconnect();

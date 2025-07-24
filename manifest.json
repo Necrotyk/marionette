@@ -1,19 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Marionette Companion",
-  "version": "1.2",
+  "version": "1.3",
   "description": "Connects the Marionette interface to a self-hosted server agent.",
   "permissions": [
     "storage",
     "scripting",
     "declarativeNetRequest"
   ],
-  "optional_permissions": [
-    "<all_urls>"
-  ],
   "host_permissions": [
-    "http://localhost/*",
-    "https://*.dystopi.cc/*"
+    "http://localhost:*/",
+    "http://127.0.0.1:*/"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -29,7 +26,8 @@
   "content_scripts": [
     {
       "matches": [
-        "<all_urls>"
+        "http://localhost:*/*",
+        "http://127.0.0.1:*/*"
       ],
       "js": [
         "browser-polyfill.js",
@@ -44,7 +42,8 @@
         "injector.js"
       ],
       "matches": [
-        "<all_urls>"
+        "http://localhost:*/*",
+        "http://127.0.0.1:*/*"
       ]
     }
   ],

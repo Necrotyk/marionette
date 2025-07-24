@@ -15,10 +15,14 @@ import time
 from pathlib import Path
 from websockets.server import serve
 from websockets.exceptions import ConnectionClosed
+from OpenSSL import crypto
 
 # --- Configuration ---
 API_KEY_FILE = Path(__file__).parent / "api_keys.json"
 MAX_MESSAGE_SIZE = 1024 * 1024  # 1 MB
+CERT_FILE = Path(__file__).parent / "marionette.crt"
+KEY_FILE = Path(__file__).parent / "marionette.key"
+
 
 # --- ANSI Color Codes for Logging ---
 class Colors:
@@ -39,6 +43,38 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 log = logging.getLogger(__name__)
+
+# --- Self-Signed Certificate Generation ---
+def generate_self_signed_cert(cert_path, key_path):
+    """Generates a self-signed certificate if one doesn't exist."""
+    if cert_path.exists() and key_path.exists():
+        return
+
+    log.info("Generating new self-signed SSL certificate...")
+    k = crypto.PKey()
+    k.generate_key(crypto.TYPE_RSA, 4096)
+
+    cert = crypto.X509()
+    cert.get_subject().C = "US"
+    cert.get_subject().ST = "California"
+    cert.get_subject().L = "San Francisco"
+    cert.get_subject().O = "Marionette"
+    cert.get_subject().OU = "Marionette Self-Signed"
+    cert.get_subject().CN = "localhost"
+    cert.set_serial_number(secrets.randbits(64))
+    cert.gmtime_adj_notBefore(0)
+    cert.gmtime_adj_notAfter(10*365*24*60*60) # 10 years
+    cert.set_issuer(cert.get_subject())
+    cert.set_pubkey(k)
+    cert.sign(k, 'sha256')
+
+    with open(cert_path, "wb") as f:
+        f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+    with open(key_path, "wb") as f:
+        f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+    log.info(f"Certificate saved to {cert_path}")
+    log.info(f"Private key saved to {key_path}")
+
 
 # --- API Key Management ---
 def load_api_keys():
@@ -202,12 +238,12 @@ async def main():
         description="Marionette WebSocket Agent",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    # --- CRITICAL FIX: Make --directory mandatory ---
     parser.add_argument("-d", "--directory", required=True, help="[REQUIRED] The directory to jail the agent's shell and filesystem operations to.")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind.")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind. Defaults to 0.0.0.0 to allow remote connections.")
     parser.add_argument("--port", type=int, default=9001, help="Port to bind.")
     parser.add_argument("--ssl-cert", help="Path to SSL certificate file.")
     parser.add_argument("--ssl-key", help="Path to SSL private key file.")
+    parser.add_argument("--allow-insecure", action="store_true", help="Allow insecure ws:// connections. NOT RECOMMENDED.")
     parser.add_argument("--generate-key", action="store_true", help="Generate a new persistent API key and exit.")
     parser.add_argument("--generate-temp-key", action="store_true", help="Generate a new one-time use API key and exit.")
     args = parser.parse_args()
@@ -216,7 +252,7 @@ async def main():
         key = generate_api_key("persistent")
         print(f"Generated new persistent API key:\n{Colors.BLUE}{key}{Colors.ENDC}")
         return
-    if args.generate_temp-key:
+    if args.generate_temp_key:
         key = generate_api_key("temporary")
         print(f"Generated new temporary (one-time use) API key:\n{Colors.CYAN}{key}{Colors.ENDC}")
         return
@@ -233,15 +269,29 @@ async def main():
     
     ssl_context = None
     protocol = "ws"
-    if args.ssl_cert and args.ssl_key:
+    
+    # --- SECURITY FIX: Enforce SSL/TLS by default ---
+    if not args.allow_insecure:
         protocol = "wss"
+        cert_path = Path(args.ssl_cert) if args.ssl_cert else CERT_FILE
+        key_path = Path(args.ssl_key) if args.ssl_key else KEY_FILE
+
+        if not cert_path.exists() or not key_path.exists():
+            if args.ssl_cert or args.ssl_key:
+                log.error("Specified SSL certificate or key not found.")
+                return
+            try:
+                generate_self_signed_cert(cert_path, key_path)
+            except ImportError:
+                log.error("PyOpenSSL is required to generate certificates. Please run: pip install pyopenssl")
+                return
+        
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ssl_context.load_cert_chain(args.ssl_cert, args.ssl_key)
+        ssl_context.load_cert_chain(cert_path, key_path)
+        log.info(f"SSL is enabled. Using cert: {cert_path}")
     else:
-        # --- HIGH-VISIBILITY WARNING for insecure transport ---
-        print(f"\n{Colors.BOLD}{Colors.YELLOW}WARNING: Running without SSL/TLS (wss://). The connection is NOT encrypted.{Colors.ENDC}")
-        print(f"{Colors.YELLOW}Your API key could be intercepted by a Man-in-the-Middle attack.{Colors.ENDC}")
-        print(f"{Colors.YELLOW}It is strongly recommended to use --ssl-cert and --ssl-key for production.{Colors.ENDC}\n")
+        print(f"\n{Colors.BOLD}{Colors.RED}WARNING: Insecure mode enabled. The connection is NOT encrypted.{Colors.ENDC}")
+        print(f"{Colors.RED}This is NOT recommended for production or any sensitive environment.{Colors.ENDC}\n")
 
     
     loop = asyncio.get_running_loop()
