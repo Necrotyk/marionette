@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 from websockets.server import serve
 from websockets.exceptions import ConnectionClosed
-from OpenSSL import crypto
 
 # --- Configuration ---
 API_KEY_FILE = Path(__file__).parent / "api_keys.json"
@@ -50,6 +49,14 @@ def generate_self_signed_cert(cert_path, key_path):
     if cert_path.exists() and key_path.exists():
         return
 
+    # SECURITY NOTE: PyOpenSSL is an optional dependency for generating certs.
+    try:
+        from OpenSSL import crypto
+    except ImportError:
+        log.error("PyOpenSSL is required to generate self-signed certificates.")
+        log.error("Please run: pip install pyopenssl")
+        raise
+
     log.info("Generating new self-signed SSL certificate...")
     k = crypto.PKey()
     k.generate_key(crypto.TYPE_RSA, 4096)
@@ -81,7 +88,11 @@ def load_api_keys():
     if not API_KEY_FILE.exists():
         return {}
     with open(API_KEY_FILE, 'r') as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            log.error(f"Could not parse {API_KEY_FILE}. It may be corrupted.")
+            return {}
 
 def save_api_keys(keys):
     with open(API_KEY_FILE, 'w') as f:
@@ -95,17 +106,28 @@ def generate_api_key(key_type="persistent"):
     save_api_keys(keys)
     return new_key
 
-def validate_api_key(key):
+# SECURITY FIX: The validation logic is now split.
+# get_key_type checks for validity without modifying state.
+# invalidate_temp_key is called explicitly after a session ends.
+def get_key_type(key):
+    """Checks for a key's existence and returns its type, or None if invalid."""
+    if not key: return None
     keys = load_api_keys()
-    if key in keys:
-        key_info = keys[key]
-        if key_info.get("type") == "temporary":
-            del keys[key]
-            save_api_keys(keys)
-        return True
-    return False
+    return keys.get(key, {}).get("type")
 
-# --- Terminal & Filesystem Classes (Unchanged) ---
+def invalidate_temp_key(key):
+    """Securely removes a temporary key from the store."""
+    if not key: return
+    keys = load_api_keys()
+    if key in keys and keys[key].get("type") == "temporary":
+        del keys[key]
+        try:
+            save_api_keys(keys)
+            log.info(f"Successfully invalidated temporary key.")
+        except Exception as e:
+            log.error(f"CRITICAL: Failed to save API key file after invalidating temp key! {e}")
+
+# --- Terminal & Filesystem Classes ---
 class TerminalManager:
     def __init__(self, jailed_dir, loop, send_response_func):
         self.sessions = {}
@@ -161,17 +183,30 @@ class SecureFileSystem:
 
     def _resolve_path(self, user_path: str) -> Path | None:
         try:
+            # Prevent path components like '..' from escaping the jail.
+            # os.path.normpath is used to collapse redundant separators and up-level references.
             clean_user_path = os.path.normpath(Path('/') / user_path).lstrip('/')
+            
+            # Join the jailed base directory with the cleaned user path.
             resolved_path = (self.base_dir / clean_user_path).resolve()
-            if self.base_dir in resolved_path.parents or resolved_path == self.base_dir:
-                return resolved_path
-        except Exception: pass
-        return None
+
+            # SECURITY FIX: Use os.path.commonpath to robustly check for path traversal.
+            # This is the most reliable way to ensure the resolved_path is truly
+            # within the base_dir.
+            common_prefix = os.path.commonpath([self.base_dir, resolved_path])
+            if str(common_prefix) != str(self.base_dir):
+                log.warning(f"Path traversal attempt blocked: '{user_path}' resolved outside of jail.")
+                return None
+                
+            return resolved_path
+        except Exception as e:
+            log.error(f"Error resolving path '{user_path}': {e}")
+            return None
 
     def list_directory(self, path: str):
         resolved_path = self._resolve_path(path)
         if not resolved_path or not resolved_path.is_dir():
-            return {"success": False, "error": "Directory not found."}
+            return {"success": False, "error": "Directory not found or is not a directory."}
         try:
             content = [{"name": item.name, "type": "dir" if item.is_dir() else "file"} for item in os.scandir(resolved_path)]
             return {"success": True, "path": path, "content": content}
@@ -207,12 +242,15 @@ class WebSocketHandler:
             await self.send_response(websocket, {"type": "fs_ls_response", "window_id": window_id, **response})
 
     async def main_handler(self, websocket, path):
+        api_key = None
+        key_type = None
         try:
             auth_message = await asyncio.wait_for(websocket.recv(), timeout=5.0)
             auth_data = json.loads(auth_message)
             api_key = auth_data.get("token")
             
-            if not api_key or not validate_api_key(api_key):
+            key_type = get_key_type(api_key)
+            if not key_type:
                 raise ValueError("Invalid API Key")
                 
             await self.send_response(websocket, {"type": "auth_success"})
@@ -229,6 +267,11 @@ class WebSocketHandler:
         except ConnectionClosed:
             log.info(f"Client {websocket.remote_address} disconnected.")
         finally:
+            # SECURITY FIX: Invalidate temporary key after the connection is closed.
+            if key_type == "temporary":
+                invalidate_temp_key(api_key)
+            
+            # Clean up any sessions associated with the disconnected websocket
             client_sessions = [wid for wid, sess in self.terminal_manager.sessions.items() if sess['websocket'] == websocket]
             for wid in client_sessions:
                 self.terminal_manager.terminate_session(wid)
@@ -270,7 +313,7 @@ async def main():
     ssl_context = None
     protocol = "ws"
     
-    # --- SECURITY FIX: Enforce SSL/TLS by default ---
+    # Enforce SSL/TLS by default unless explicitly disabled
     if not args.allow_insecure:
         protocol = "wss"
         cert_path = Path(args.ssl_cert) if args.ssl_cert else CERT_FILE
@@ -282,13 +325,18 @@ async def main():
                 return
             try:
                 generate_self_signed_cert(cert_path, key_path)
-            except ImportError:
-                log.error("PyOpenSSL is required to generate certificates. Please run: pip install pyopenssl")
+            except Exception as e:
+                log.error(f"Could not generate self-signed certificate: {e}")
                 return
         
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ssl_context.load_cert_chain(cert_path, key_path)
-        log.info(f"SSL is enabled. Using cert: {cert_path}")
+        try:
+            ssl_context.load_cert_chain(cert_path, key_path)
+            log.info(f"SSL is enabled. Using cert: {cert_path}")
+        except ssl.SSLError as e:
+            log.error(f"Error loading SSL certificate: {e}")
+            log.error("Please provide a valid certificate and key or use the --allow-insecure flag (not recommended).")
+            return
     else:
         print(f"\n{Colors.BOLD}{Colors.RED}WARNING: Insecure mode enabled. The connection is NOT encrypted.{Colors.ENDC}")
         print(f"{Colors.RED}This is NOT recommended for production or any sensitive environment.{Colors.ENDC}\n")

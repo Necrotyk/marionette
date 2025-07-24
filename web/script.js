@@ -1603,6 +1603,11 @@ function setupSelectionBox() {
 function setupCompanionListeners() {
     console.log("Setting up Marionette Companion event listeners.");
     const ansi_up = new AnsiUp();
+    // SECURITY FIX: Disable the linkify feature in ansi_up to prevent it from creating
+    // clickable links from untrusted shell output.
+    ansi_up.use_classes = true;
+    ansi_up.linkify = false;
+
 
     const companionStatusIcon = document.createElement('i');
     companionStatusIcon.className = 'fa-solid fa-circle-xmark';
@@ -1612,6 +1617,11 @@ function setupCompanionListeners() {
 
     const remoteApps = document.querySelectorAll('.remote-app');
     const remoteSeparators = document.querySelectorAll('#remote-separator, #remote-places-separator');
+
+    // SECURITY FIX: Create a reusable function to escape HTML special characters.
+    const escapeHTML = (str) => {
+        return str.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    };
 
     window.addEventListener('marionette-message', (event) => {
         const message = JSON.parse(event.detail);
@@ -1655,15 +1665,17 @@ function setupCompanionListeners() {
                         const completedLines = lines.join('\n');
 
                         if (completedLines) {
-                            const html = ansi_up.ansi_to_html(completedLines.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
-                            outputEl.insertAdjacentHTML('beforeend', html + '<br>');
+                            // SECURITY FIX: Escape HTML from shell output before converting ANSI to prevent XSS.
+                            const safeHtml = ansi_up.ansi_to_html(escapeHTML(completedLines));
+                            outputEl.insertAdjacentHTML('beforeend', safeHtml + '<br>');
                         }
                         
+                        // Also sanitize the prompt, which can contain control characters
                         if (newPrompt.includes('\r')) {
                             const parts = newPrompt.split('\r');
-                            promptEl.innerHTML = ansi_up.ansi_to_html(parts.pop().replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+                            promptEl.innerHTML = ansi_up.ansi_to_html(escapeHTML(parts.pop()));
                         } else {
-                            promptEl.innerHTML += ansi_up.ansi_to_html(newPrompt.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+                            promptEl.innerHTML += ansi_up.ansi_to_html(escapeHTML(newPrompt));
                         }
                         
                         contentEl.scrollTop = contentEl.scrollHeight;

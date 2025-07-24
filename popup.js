@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const disconnectBtn = document.getElementById('disconnect-btn');
     const statusDiv = document.getElementById('status');
     const serverAddressInput = document.getElementById('server-address');
-    const apiKeyInput = document.getElementById('api-key'); // Updated ID
+    const authTokenInput = document.getElementById('auth-token'); // Corrected ID from original HTML
     const profileSelect = document.getElementById('profile-select');
 
     // Profile Management Buttons
@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const editingProfileIdInput = document.getElementById('editing-profile-id');
     const profileNameInput = document.getElementById('profile-name');
     const profileAddressInput = document.getElementById('profile-address');
-    const profileKeyInput = document.getElementById('profile-key'); // Updated ID
+    const profileTokenInput = document.getElementById('profile-token');
     
     // Notification Element
     const notificationArea = document.getElementById('notification-area');
@@ -28,6 +28,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let profiles = [];
     let currentStatus = 'disconnected';
+
+    // SECURITY FIX: Use chrome.storage.session instead of chrome.storage.local.
+    // This ensures API keys are not persisted to disk, mitigating theft from a
+    // compromised machine. The trade-off is that profiles must be re-created
+    // if the browser is fully closed.
+    const storage = chrome.storage.session;
+
 
     // --- Notification System ---
     function showNotification(message, duration = 3000) {
@@ -41,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Profile Management ---
     async function loadProfiles() {
-        const data = await chrome.storage.local.get({ profiles: [] });
+        const data = await storage.get({ profiles: [] });
         profiles = data.profiles;
         profileSelect.innerHTML = '';
         if (profiles.length === 0) {
@@ -49,6 +56,8 @@ document.addEventListener('DOMContentLoaded', () => {
             editProfileBtn.disabled = true;
             deleteProfileBtn.disabled = true;
             connectBtn.disabled = true;
+            serverAddressInput.value = '';
+            authTokenInput.value = '';
         } else {
             profiles.forEach(profile => {
                 const option = document.createElement('option');
@@ -66,14 +75,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateFormForSelectedProfile() {
         if (profiles.length === 0) {
             serverAddressInput.value = '';
-            apiKeyInput.value = '';
+            authTokenInput.value = '';
             return;
         }
         const selectedId = profileSelect.value;
         const selectedProfile = profiles.find(p => p.id === selectedId);
         if (selectedProfile) {
             serverAddressInput.value = selectedProfile.address;
-            apiKeyInput.value = selectedProfile.apiKey; // Updated property
+            authTokenInput.value = selectedProfile.token;
         }
     }
 
@@ -82,14 +91,15 @@ document.addEventListener('DOMContentLoaded', () => {
             profileFormTitle.textContent = 'Edit Profile';
             editingProfileIdInput.value = profile.id;
             profileNameInput.value = profile.name;
-            profileAddressInput.value = profile.address.replace(/^wss?:\/\//, '').replace(/:9001$/, '');
-            profileKeyInput.value = profile.apiKey; // Updated property
+            // Strip protocol and port for user-friendly editing
+            profileAddressInput.value = profile.address.replace(/^wss?:\/\//, '').replace(/:\d+$/, '');
+            profileTokenInput.value = profile.token;
         } else {
             profileFormTitle.textContent = 'Add New Profile';
             editingProfileIdInput.value = '';
             profileNameInput.value = '';
             profileAddressInput.value = '';
-            profileKeyInput.value = '';
+            profileTokenInput.value = '';
         }
         profileFormModal.classList.add('visible');
     }
@@ -101,13 +111,14 @@ document.addEventListener('DOMContentLoaded', () => {
     async function saveProfile() {
         const name = profileNameInput.value.trim();
         let address = profileAddressInput.value.trim();
-        const apiKey = profileKeyInput.value.trim(); // Updated variable
+        const token = profileTokenInput.value.trim();
 
-        if (!name || !address || !apiKey) {
+        if (!name || !address || !token) {
             showNotification("All fields are required.");
             return;
         }
-
+        
+        // Add default protocol and port if not specified
         if (!address.startsWith('ws://') && !address.startsWith('wss://')) {
             address = 'wss://' + address;
         }
@@ -119,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
             id: editingProfileIdInput.value || `profile_${Date.now()}`,
             name,
             address,
-            apiKey, // Updated property
+            token,
         };
 
         const existingIndex = profiles.findIndex(p => p.id === profileData.id);
@@ -129,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
             profiles.push(profileData);
         }
 
-        await chrome.storage.local.set({ profiles });
+        await storage.set({ profiles });
         await loadProfiles();
         profileSelect.value = profileData.id;
         updateFormForSelectedProfile();
@@ -141,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (profiles.length === 0) return;
         const selectedId = profileSelect.value;
         profiles = profiles.filter(p => p.id !== selectedId);
-        await chrome.storage.local.set({ profiles });
+        await storage.set({ profiles });
         await loadProfiles();
         updateFormForSelectedProfile();
         showNotification("Profile deleted.");
@@ -160,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('connection-form').style.display = 'block';
             disconnectBtn.style.display = 'none';
             if (status === 'disconnected' && reason === 'auth_fail') {
-                showNotification("Connection failed: Invalid API Key.");
+                showNotification("Connection failed: Invalid Auth Token.");
             } else if (status === 'disconnected' && reason) {
                 showNotification("Connection failed. Check agent and URL.");
             }
@@ -182,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     connectBtn.addEventListener('click', () => {
         const address = serverAddressInput.value;
-        const token = apiKeyInput.value; // Send the API key as the token
+        const token = authTokenInput.value;
         if (!address || !token || currentStatus === 'connected') return;
         
         chrome.runtime.sendMessage({ type: 'connect', address, token });
