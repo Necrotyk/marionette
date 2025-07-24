@@ -50,7 +50,7 @@ def load_api_keys():
 def save_api_keys(keys):
     with open(API_KEY_FILE, 'w') as f:
         json.dump(keys, f, indent=2)
-    os.chmod(API_KEY_FILE, 0o600) # Set read/write permissions for owner only
+    os.chmod(API_KEY_FILE, 0o600)
 
 def generate_api_key(key_type="persistent"):
     keys = load_api_keys()
@@ -64,15 +64,13 @@ def validate_api_key(key):
     if key in keys:
         key_info = keys[key]
         if key_info.get("type") == "temporary":
-            # Invalidate temporary key after first use
             del keys[key]
             save_api_keys(keys)
         return True
     return False
 
-# --- Terminal & Filesystem Classes (No changes from previous version) ---
+# --- Terminal & Filesystem Classes (Unchanged) ---
 class TerminalManager:
-    """Manages multiple PTY sessions for connected clients."""
     def __init__(self, jailed_dir, loop, send_response_func):
         self.sessions = {}
         self.jailed_dir = Path(jailed_dir).resolve()
@@ -90,15 +88,15 @@ class TerminalManager:
                 return
             response_data = {"type": "shell_output", "window_id": window_id, "data": data.decode('utf-8', errors='replace')}
             asyncio.create_task(self.send_response(websocket, response_data))
-        except Exception as e:
+        except Exception:
             self.terminate_session(window_id)
 
     async def create_session(self, websocket, window_id):
         pid, fd = pty.fork()
-        if pid == 0:  # Child
+        if pid == 0:
             os.chdir(self.jailed_dir)
             os.execv(os.environ.get("SHELL", "/bin/bash"), [os.environ.get("SHELL", "/bin/bash")])
-        else:  # Parent
+        else:
             log.info(f"Created PTY session for {window_id} (PID: {pid}) in {self.jailed_dir}")
             fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
             self.sessions[window_id] = {'pid': pid, 'fd': fd, 'websocket': websocket}
@@ -176,7 +174,7 @@ class WebSocketHandler:
         try:
             auth_message = await asyncio.wait_for(websocket.recv(), timeout=5.0)
             auth_data = json.loads(auth_message)
-            api_key = auth_data.get("token") # The popup still sends a "token" field
+            api_key = auth_data.get("token")
             
             if not api_key or not validate_api_key(api_key):
                 raise ValueError("Invalid API Key")
@@ -185,6 +183,7 @@ class WebSocketHandler:
             log.info(f"Client {websocket.remote_address} authenticated successfully.")
         except Exception as e:
             log.warning(f"Auth failed for {websocket.remote_address}: {e}")
+            await self.send_response(websocket, {"type": "auth_fail"})
             await websocket.close()
             return
 
@@ -194,16 +193,19 @@ class WebSocketHandler:
         except ConnectionClosed:
             log.info(f"Client {websocket.remote_address} disconnected.")
         finally:
-            # Clean up all terminal sessions for this disconnected client
             client_sessions = [wid for wid, sess in self.terminal_manager.sessions.items() if sess['websocket'] == websocket]
             for wid in client_sessions:
                 self.terminal_manager.terminate_session(wid)
 
 async def main():
-    parser = argparse.ArgumentParser(description="Marionette WebSocket Agent")
+    parser = argparse.ArgumentParser(
+        description="Marionette WebSocket Agent",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    # --- CRITICAL FIX: Make --directory mandatory ---
+    parser.add_argument("-d", "--directory", required=True, help="[REQUIRED] The directory to jail the agent's shell and filesystem operations to.")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind.")
     parser.add_argument("--port", type=int, default=9001, help="Port to bind.")
-    parser.add_argument("-d", "--directory", default=str(Path.home()), help="Directory to jail shell and filesystem operations.")
     parser.add_argument("--ssl-cert", help="Path to SSL certificate file.")
     parser.add_argument("--ssl-key", help="Path to SSL private key file.")
     parser.add_argument("--generate-key", action="store_true", help="Generate a new persistent API key and exit.")
@@ -214,7 +216,7 @@ async def main():
         key = generate_api_key("persistent")
         print(f"Generated new persistent API key:\n{Colors.BLUE}{key}{Colors.ENDC}")
         return
-    if args.generate_temp_key:
+    if args.generate_temp-key:
         key = generate_api_key("temporary")
         print(f"Generated new temporary (one-time use) API key:\n{Colors.CYAN}{key}{Colors.ENDC}")
         return
@@ -235,6 +237,12 @@ async def main():
         protocol = "wss"
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.load_cert_chain(args.ssl_cert, args.ssl_key)
+    else:
+        # --- HIGH-VISIBILITY WARNING for insecure transport ---
+        print(f"\n{Colors.BOLD}{Colors.YELLOW}WARNING: Running without SSL/TLS (wss://). The connection is NOT encrypted.{Colors.ENDC}")
+        print(f"{Colors.YELLOW}Your API key could be intercepted by a Man-in-the-Middle attack.{Colors.ENDC}")
+        print(f"{Colors.YELLOW}It is strongly recommended to use --ssl-cert and --ssl-key for production.{Colors.ENDC}\n")
+
     
     loop = asyncio.get_running_loop()
     handler_instance = WebSocketHandler(loop, args.directory)

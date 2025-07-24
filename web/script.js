@@ -226,7 +226,7 @@ function updateClock() {
     });
 }
 
-// --- Window Management ---
+// --- Window Management (No changes from previous version) ---
 const WindowManager = {
     windows: new Map(),
     highestZ: 100,
@@ -537,7 +537,7 @@ const WindowManager = {
         inputEl.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 const command = inputEl.value.trim();
-                outputEl.innerHTML += `${prompt}${command}<br>`;
+                outputEl.innerHTML += `${prompt}${sanitizeHTML(command)}<br>`;
                 if (command) {
                     history.push(command);
                     historyIndex = history.length;
@@ -973,6 +973,46 @@ const WindowManager = {
             case 'ls':
                 result = Object.keys(fileSystem.home.children[desktopSettings.username].children.Desktop.children).join('<br>');
                 break;
+            case 'grep':
+                const grepParts = cmd.match(/"(.*?)"/);
+                const grepPattern = grepParts ? grepParts[1] : null;
+                const grepFilePath = args[args.length - 1];
+                if (grepPattern && grepFilePath) {
+                    const file = getFileByPath(grepFilePath);
+                    if (file && file.type === 'file') {
+                        const regex = new RegExp(grepPattern, 'g');
+                        const lines = file.content.split('\n');
+                        const matchingLines = lines.filter(line => line.match(regex));
+                        
+                        // --- XSS FIX: Build result using secure DOM methods ---
+                        const resultFragment = document.createDocumentFragment();
+                        matchingLines.forEach(line => {
+                            const lineEl = document.createElement('div');
+                            const parts = line.split(regex);
+                            const matches = line.match(regex);
+                            
+                            parts.forEach((part, index) => {
+                                if (part) {
+                                    lineEl.appendChild(document.createTextNode(part));
+                                }
+                                if (index < parts.length - 1) {
+                                    const matchEl = document.createElement('span');
+                                    matchEl.className = 'grep-match';
+                                    matchEl.textContent = matches[index];
+                                    lineEl.appendChild(matchEl);
+                                }
+                            });
+                            resultFragment.appendChild(lineEl);
+                        });
+                        outputEl.appendChild(resultFragment);
+                        return; // Return early as we've already appended the result
+                    } else {
+                        result = `grep: ${grepFilePath}: No such file or directory`;
+                    }
+                } else {
+                    result = 'Usage: grep "pattern" /path/to/file';
+                }
+                break;
             case 'neofetch':
                 const ua = navigator.userAgent;
                 let os = "Unknown OS";
@@ -1007,6 +1047,7 @@ const WindowManager = {
     }
 };
 
+// ... (Rest of the file is unchanged) ...
 const Steganography = {
     zero: '\u200B',
     one: '\u200C',
@@ -1036,7 +1077,6 @@ const Steganography = {
     }
 };
 
-// --- Context Menu ---
 function setupContextMenu() {
     const desktop = document.getElementById('desktop');
     const menu = document.getElementById('context-menu');
@@ -1213,7 +1253,6 @@ function updateWebAppList() {
     }
 }
 
-// --- Panel Menus & Launching ---
 function setupPanelMenus() {
     const menuButtons = document.querySelectorAll('.panel-menu-container > .panel-menu');
 
@@ -1561,7 +1600,6 @@ function setupSelectionBox() {
     });
 }
 
-// --- Marionette Companion Integration ---
 function setupCompanionListeners() {
     console.log("Setting up Marionette Companion event listeners.");
     const ansi_up = new AnsiUp();
