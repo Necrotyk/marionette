@@ -8,14 +8,36 @@
 
 console.log("Marionette Companion: Injector script running in page context.");
 
+// --- SECURITY ENHANCEMENT: NONCE ---
+/**
+ * Retrieves the nonce passed from the content script via a data attribute.
+ * This is necessary to authenticate messages sent back to the content script.
+ * We use document.currentScript for modern browsers and a fallback for others.
+ */
+const currentScript = document.currentScript ||
+    Array.from(document.getElementsByTagName('script'))
+         .find(s => s.src && s.src.includes('injector.js'));
+const MARIONETTE_NONCE = currentScript ? currentScript.getAttribute('data-marionette-nonce') : null;
+
+// Expose the nonce to the global window scope so that the main application script (script.js) can use it.
+if (MARIONETTE_NONCE) {
+    window.__MARIONETTE_NONCE__ = MARIONETTE_NONCE;
+} else {
+    console.error("Marionette Companion: CRITICAL - Could not retrieve security nonce. Communication with the extension will fail.");
+}
+
+
 /**
  * Dispatches a custom DOM event on the window object. This is the primary
  * method for communicating from the page context back to the content script.
+ * It automatically includes the security nonce.
  * @param {string} eventName - The name of the custom event.
  * @param {object} detail - The data payload for the event.
  */
 function dispatchToContentScript(eventName, detail) {
-    window.dispatchEvent(new CustomEvent(eventName, { detail }));
+    // Always include the nonce in the message detail for validation by the content script.
+    const secureDetail = { ...detail, nonce: MARIONETTE_NONCE };
+    window.dispatchEvent(new CustomEvent(eventName, { detail: secureDetail }));
 }
 
 // This listener acts as a bridge, catching all 'marionette-send-message' events
@@ -43,7 +65,7 @@ const resizeObserver = new MutationObserver(mutations => {
                     const cols = Math.floor(contentEl.clientWidth / 8);  
                     const windowId = windowEl.id.replace('window-', '');
                     
-                    // Dispatch the resize event to the content script
+                    // Dispatch the resize event to the content script using the secure dispatcher
                     dispatchToContentScript('marionette-send-message', {
                         type: 'shell_resize',
                         window_id: windowId,

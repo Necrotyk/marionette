@@ -34,32 +34,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  * SECURITY FIX: Listens for events from the web page (relayed via injector.js)
  * and sends them to the background script, but only if they are trusted.
  */
-window.addEventListener('marionette-send-message', (event) => {
-    // The `isTrusted` property is false for events dispatched by page scripts,
-    // which is what we want to prevent. However, our communication relies on
-    // this mechanism. A better check is to validate the message content itself,
-    // but for this architecture, we add a simple check to ensure the detail exists.
-    if (event.detail) {
-        chrome.runtime.sendMessage(event.detail);
-    } else {
-        console.warn("Marionette Companion: Untrusted or malformed message received from page. Discarding.", event);
-    }
-});
-
-
-/**
- * Injects the injector.js script into the main page's context. This script
- * has direct access to the page's DOM and window object.
- */
+// Injects the injector.js script into the main page's context with the nonce
 function injectScript() {
     try {
         const script = document.createElement('script');
         script.src = chrome.runtime.getURL('injector.js');
+        script.setAttribute('data-marionette-nonce', MARIONETTE_NONCE);
         (document.head || document.documentElement).appendChild(script);
         script.onload = () => {
-            // Once loaded, the script has done its job, so we can remove the element.
             script.remove();
-            // Request initial connection status from the background script.
             chrome.runtime.sendMessage({ type: 'get-connection-status' });
         };
         console.log("Marionette Companion: Injector script loaded into page context.");
@@ -67,6 +50,32 @@ function injectScript() {
         console.error("Marionette Companion: Error injecting script.", e);
     }
 }
+
+
+// Injects the injector.js script into the main page's context with the nonce
+function injectScript() {
+    try {
+        const script = document.createElement('script');
+        script.src = chrome.runtime.getURL('injector.js');
+        script.setAttribute('data-marionette-nonce', MARIONETTE_NONCE);
+        (document.head || document.documentElement).appendChild(script);
+        script.onload = () => {
+            script.remove();
+            chrome.runtime.sendMessage({ type: 'get-connection-status' });
+        };
+        console.log("Marionette Companion: Injector script loaded into page context.");
+    } catch (e) {
+        console.error("Marionette Companion: Error injecting script.", e);
+    }
+}
+
+// Generate a random nonce for secure communication
+function generateNonce() {
+    // 128-bit random nonce as a hex string
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const MARIONETTE_NONCE = generateNonce();
 
 // Use a MutationObserver to wait until the web app's main object is available
 // before injecting our script. This ensures the UI is ready.
