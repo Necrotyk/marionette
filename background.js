@@ -5,6 +5,18 @@ let socket = null;
 // Use chrome.storage.session for non-persistent state if available, otherwise fall back to local.
 const storageArea = chrome.storage.session || chrome.storage.local;
 
+// --- SECURITY ENHANCEMENT ---
+// An allowlist of message types that are permitted to be sent from the
+// content script (and by extension, the web UI) to the WebSocket agent.
+// This prevents compromised page scripts from sending arbitrary commands.
+const ALLOWED_MESSAGE_TYPES = new Set([
+    'shell_create',
+    'shell_input',
+    'shell_resize',
+    'shell_close',
+    'fs_ls'
+]);
+
 // Function to get the current connection state from storage
 async function getConnectionState() {
     return new Promise(resolve => {
@@ -18,16 +30,16 @@ async function updateStatus(status, address = '', token = '') {
     await storageArea.set(state);
     
     // Notify the popup
-    await chrome.runtime.sendMessage({ type: 'statusUpdate', status }).catch(e => console.log("Popup not open."));
+    await chrome.runtime.sendMessage({ type: 'statusUpdate', status }).catch(e => {});
     
     // Notify all content scripts
-    const tabs = await chrome.tabs.query({});
+    const tabs = await chrome.tabs.query({ /* all tabs */ });
     for (const tab of tabs) {
         try {
-            await chrome.tabs.sendMessage(tab.id, { type: status === 'connected' ? 'dystopi-connected' : 'dystopi-disconnected' });
+            // Use a more specific message type to avoid conflicts
+            await chrome.tabs.sendMessage(tab.id, { type: status === 'connected' ? 'marionette-connected' : 'marionette-disconnected' });
         } catch (e) {
             // This can happen if the content script is not injected in a tab, which is fine.
-            // console.log(`Could not send message to tab ${tab.id}: ${e.message}`);
         }
     }
     console.log(`Status updated to: ${status}`);
@@ -45,6 +57,7 @@ function connectWebSocket(address, token) {
 
     socket.onopen = () => {
         console.log("WebSocket opened. Sending authentication token.");
+        // Use a structured object for auth, consistent with other messages
         socket.send(JSON.stringify({ type: "auth", token: token }));
     };
 
@@ -59,7 +72,7 @@ function connectWebSocket(address, token) {
                 console.log("Authentication failed.");
                 socket.close(1000, "Authentication Failed");
             } else {
-                // Forward all other messages to the appropriate tab
+                // Forward all other messages to all relevant tabs
                 chrome.tabs.query({}).then(tabs => {
                     tabs.forEach(tab => {
                          chrome.tabs.sendMessage(tab.id, message).catch(() => {});
@@ -74,12 +87,20 @@ function connectWebSocket(address, token) {
     socket.onclose = (event) => {
         console.log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
         socket = null;
-        updateStatus('disconnected');
+        // Pass the reason for disconnection for better error reporting in the UI
+        const reason = event.reason === "Authentication Failed" ? "auth_fail" : "generic";
+        updateStatus('disconnected', '', '', reason);
     };
 
     socket.onerror = (error) => {
         console.error("WebSocket error:", error);
         // The onclose event will usually fire immediately after this.
+        const errorMessage = { type: 'marionette-error', message: 'WebSocket connection failed.' };
+         chrome.tabs.query({}).then(tabs => {
+            tabs.forEach(tab => {
+                 chrome.tabs.sendMessage(tab.id, errorMessage).catch(() => {});
+            });
+        });
     };
 }
 
@@ -94,17 +115,30 @@ function disconnectWebSocket() {
 
 // Listener for messages from the popup or content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Internal extension messages for connection management
     if (message.type === 'connect') {
         connectWebSocket(message.address, message.token);
-    } else if (message.type === 'disconnect') {
+        return; // Do not process further
+    } 
+    if (message.type === 'disconnect') {
         disconnectWebSocket();
-    } else if (message.type === 'get-connection-status') {
+        return; // Do not process further
+    } 
+    if (message.type === 'get-connection-status') {
         getConnectionState().then(state => sendResponse(state));
         return true; // Indicates an async response
-    } else if (socket && socket.readyState === WebSocket.OPEN) {
-        // Forward messages from content script to the agent
-        console.log("BACKGROUND SEND ->", message);
-        socket.send(JSON.stringify(message));
+    }
+
+    // --- SECURITY FIX: Validate messages before sending to WebSocket ---
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        // Check if the message type is in our allowlist.
+        if (typeof message.type === 'string' && ALLOWED_MESSAGE_TYPES.has(message.type)) {
+            console.log("BACKGROUND SEND ->", message.type);
+            socket.send(JSON.stringify(message));
+        } else {
+            // If the message type is not allowed, reject it.
+            console.warn("Rejected untrusted/unknown message type from extension context:", message);
+        }
     } else {
         console.warn("Message received but socket is not connected.", message);
     }

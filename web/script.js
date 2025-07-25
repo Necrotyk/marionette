@@ -17,6 +17,23 @@ function sanitizeHTML(str) {
     return div.innerHTML;
 }
 
+/**
+ * Securely dispatches a message to the content script.
+ * It waits for the nonce to be available on the window object (set by injector.js),
+ * then includes it with the message payload for validation.
+ * @param {object} detail - The message payload.
+ */
+function dispatchToCompanion(detail) {
+    if (window.__MARIONETTE_NONCE__) {
+        const secureDetail = { ...detail, nonce: window.__MARIONETTE_NONCE__ };
+        window.dispatchEvent(new CustomEvent('marionette-send-message', { detail: secureDetail }));
+    } else {
+        // This might happen if the message is sent before injector.js has loaded.
+        console.error("Marionette Companion: Nonce not available. Cannot send message.", detail);
+    }
+}
+
+
 // --- Animated Background (No changes) ---
 const c = document.getElementById("background-canvas");
 const ctx = c.getContext("2d");
@@ -335,9 +352,7 @@ const WindowManager = {
         const win = this.windows.get(appId);
         if (win) {
             if (appId.startsWith('remote-terminal')) {
-                window.dispatchEvent(new CustomEvent('marionette-send-message', {
-                    detail: { type: 'shell_close', window_id: appId }
-                }));
+                dispatchToCompanion({ type: 'shell_close', window_id: appId });
             }
             win.element.remove();
             this.windows.delete(appId);
@@ -486,26 +501,20 @@ const WindowManager = {
                 const html = promptEl.innerHTML + sanitizeHTML(command) + '<br>';
                 outputEl.insertAdjacentHTML('beforeend', html);
 
-                window.dispatchEvent(new CustomEvent('marionette-send-message', {
-                    detail: { type: 'shell_input', window_id: windowId, data: command + '\n' }
-                }));
+                dispatchToCompanion({ type: 'shell_input', window_id: windowId, data: command + '\n' });
                 promptEl.innerHTML = '';
                 contentEl.scrollTop = contentEl.scrollHeight;
             }
         });
         
-        window.dispatchEvent(new CustomEvent('marionette-send-message', {
-            detail: { type: 'shell_create', window_id: windowId }
-        }));
+        dispatchToCompanion({ type: 'shell_create', window_id: windowId });
     },
 
     setupRemoteFileBrowser(contentEl, winData, windowId) {
         const path = winData.currentPath;
         contentEl.innerHTML = `<div class="file-browser-nav"><button id="fs-back-btn"><i class="fa-solid fa-arrow-left"></i></button><span>${path}</span></div><div class="file-browser-grid"><p>Loading...</p></div>`;
 
-        window.dispatchEvent(new CustomEvent('marionette-send-message', {
-            detail: { type: 'fs_ls', path: path, window_id: windowId }
-        }));
+        dispatchToCompanion({ type: 'fs_ls', path: path, window_id: windowId });
 
         contentEl.querySelector('#fs-back-btn').onclick = () => {
             const newPath = path.substring(0, path.lastIndexOf('/'));
@@ -910,13 +919,42 @@ const WindowManager = {
                     return;
                 }
                 const [, p, f] = match;
-                const regex = new RegExp(p, f);
+                // Ensure the global flag is present for matchAll to work correctly
+                const flags = f.includes('g') ? f : f + 'g';
+                const regex = new RegExp(p, flags);
 
-                if (str.match(regex)) {
-                    const highlighted = str.replace(regex, (match) => `<span class="match">${match}</span>`);
-                    outputDiv.innerHTML = highlighted;
-                } else {
+                // Clear previous results
+                outputDiv.innerHTML = '';
+                
+                const matches = Array.from(str.matchAll(regex));
+
+                if (matches.length === 0) {
                     outputDiv.textContent = 'No matches found.';
+                    return;
+                }
+
+                let lastIndex = 0;
+                matches.forEach(matchData => {
+                    const [fullMatch] = matchData;
+                    const matchIndex = matchData.index;
+
+                    // Append the text before the match as a text node (safe)
+                    if (matchIndex > lastIndex) {
+                        outputDiv.appendChild(document.createTextNode(str.substring(lastIndex, matchIndex)));
+                    }
+
+                    // Create a span for the match and set its textContent (safe)
+                    const span = document.createElement('span');
+                    span.className = 'match';
+                    span.textContent = fullMatch;
+                    outputDiv.appendChild(span);
+
+                    lastIndex = matchIndex + fullMatch.length;
+                });
+
+                // Append any remaining text after the last match as a text node (safe)
+                if (lastIndex < str.length) {
+                    outputDiv.appendChild(document.createTextNode(str.substring(lastIndex)));
                 }
 
             } catch (e) {
