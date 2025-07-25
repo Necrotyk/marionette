@@ -59,9 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
             {
                 name: "PBKDF2",
                 salt: salt,
-                // FIX: Reduced iterations for better performance.
-                // 100,000 is a strong default but can be too slow on some machines.
-                // 25,000 is a compromise for responsiveness.
                 iterations: 25000,
                 hash: "SHA-256",
             },
@@ -316,14 +313,14 @@ document.addEventListener('DOMContentLoaded', () => {
         unlockBtn.disabled = true;
         unlockBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Working...';
 
-        // Use a brief timeout to allow the UI to update to the "Working..." state.
-        await new Promise(resolve => setTimeout(resolve, 50));
+        try {
+            // Use a brief timeout to allow the UI to update to the "Working..." state.
+            await new Promise(resolve => setTimeout(resolve, 50));
 
-        let { salt, check } = await storage.get(["salt", "check"]);
+            let { salt, check } = await storage.get(["salt", "check"]);
 
-        if (!salt || !check) {
-            // --- First Time Setup ---
-            try {
+            if (!salt || !check) {
+                // --- First Time Setup ---
                 const newSalt = crypto.getRandomValues(new Uint8Array(16));
                 const newKey = await deriveKey(password, newSalt);
                 const newCheck = await encrypt("marionette-check", newKey);
@@ -337,16 +334,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 passwordModal.classList.remove('visible');
                 showNotification("Password set successfully!", 2000);
                 await loadProfiles();
-            } catch (e) {
-                console.error("Password SETUP failed:", e);
-                passwordError.textContent = "Failed to set password. Please try again.";
-            } finally {
-                unlockBtn.disabled = false;
-                unlockBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock';
-            }
-        } else {
-            // --- Existing User Verification ---
-            try {
+            } else {
+                // --- Existing User Verification ---
                 const storedSalt = new Uint8Array(salt);
                 const derivedKey = await deriveKey(password, storedSalt);
                 const decryptedCheck = await decrypt(check, derivedKey);
@@ -356,16 +345,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     passwordModal.classList.remove('visible');
                     await loadProfiles();
                 } else {
-                    // This path is unlikely as decrypt should throw, but it's a safe fallback.
                     throw new Error("Check value mismatch");
                 }
-            } catch (e) {
-                console.error("Password VERIFICATION failed:", e);
-                passwordError.textContent = "Incorrect password.";
-            } finally {
-                unlockBtn.disabled = false;
-                unlockBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock';
             }
+        } catch (e) {
+            console.error("Unlock failed:", e);
+            if (e.message.includes("malformed")) {
+                passwordError.textContent = "Incorrect password.";
+            } else {
+                passwordError.textContent = "An error occurred. Please try again.";
+            }
+        } finally {
+            unlockBtn.disabled = false;
+            unlockBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock';
         }
     }
 
