@@ -13,6 +13,7 @@ SOURCE_FILES=(
   "script.js"
   "style.css"
   "manifest.json"
+  "rules.json"
 )
 FIREFOX_ONLY_FILES=(
   "browser-polyfill.js"
@@ -62,17 +63,32 @@ build_for_browser() {
   # 4. Process manifest and copy browser-specific files
   local manifest_path="$build_dir/manifest.json"
   if [ "$browser" == "firefox" ]; then
-    echo "Transforming manifest.json for Firefox (MV2)..."
-    # Use a temporary file for sed on systems that don't support -i ''
+    # --- FIX: Use jq for robust JSON transformation ---
+    if ! command -v jq &> /dev/null; then
+        echo "Error: jq is not installed. Please install jq to build for Firefox."
+        echo "On Debian/Ubuntu: sudo apt install jq"
+        exit 1
+    fi
+
+    echo "Transforming manifest.json for Firefox (MV2) using jq..."
     tmp_manifest=$(mktemp)
-    
-    # Convert to MV2, change service_worker to background scripts, adjust permissions
-    sed -e 's/"manifest_version": 3/"manifest_version": 2/' \
-        -e 's/"service_worker": "background.js"/"scripts": ["browser-polyfill.js", "background.js"]/' \
-        -e 's/"action"/"browser_action"/' \
-        -e '/"host_permissions"/d' \
-        -e 's/"storage",/"storage",\n    "<all_urls>",/' \
-        "$manifest_path" > "$tmp_manifest"
+
+    # This jq script robustly converts an MV3 manifest to a valid MV2 manifest.
+    jq '
+      .manifest_version = 2 |
+      # Convert background service_worker to background scripts
+      .background = { "scripts": ["browser-polyfill.js", .background.service_worker] } |
+      # Convert action to browser_action
+      .browser_action = .action | del(.action) |
+      # Merge host_permissions into permissions for MV2
+      .permissions = (.permissions + .host_permissions | unique) | del(.host_permissions) |
+      # Remove MV3-only permissions and keys that are invalid in MV2
+      .permissions -= ["declarativeNetRequest", "scripting"] |
+      del(.declarative_net_request) |
+      # Convert web_accessible_resources to the flat array format for MV2
+      .web_accessible_resources = .web_accessible_resources[0].resources
+    ' "$manifest_path" > "$tmp_manifest"
+
     mv "$tmp_manifest" "$manifest_path"
 
     echo "Copying Firefox-specific files..."
