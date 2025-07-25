@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const profileAddressInput = document.getElementById('profile-address');
     const profileTokenInput = document.getElementById('profile-token');
 
-    // --- FIX: Master Password Modal Elements ---
+    // Master Password Modal Elements
     const passwordModal = document.getElementById('password-modal');
     const passwordInput = document.getElementById('master-password');
     const unlockBtn = document.getElementById('unlock-btn');
@@ -34,12 +34,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let profiles = [];
     let currentStatus = 'disconnected';
-    // --- FIX: Session key, held only in memory ---
     let sessionKey = null; 
 
     const storage = chrome.storage.local;
 
-    // --- FIX: Crypto Helper Functions ---
+    // --- Crypto Helper Functions ---
 
     /**
      * Derives a cryptographic key from a user password and a salt.
@@ -86,7 +85,6 @@ document.addEventListener('DOMContentLoaded', () => {
             enc.encode(data)
         );
 
-        // Combine IV and ciphertext and base64 encode for storage
         const combined = new Uint8Array(iv.length + ciphertext.byteLength);
         combined.set(iv, 0);
         combined.set(new Uint8Array(ciphertext), iv.length);
@@ -119,7 +117,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return new TextDecoder().decode(decrypted);
         } catch (e) {
             console.error("Decryption failed:", e);
-            // Return a specific error string or re-throw to be handled by the caller
             throw new Error("Decryption failed. Incorrect password?");
         }
     }
@@ -138,22 +135,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Profile Management ---
     async function loadProfiles() {
         if (!sessionKey) {
-            showNotification("Profiles are locked.", 2000);
+            passwordModal.classList.add('visible');
             return;
         }
         const data = await storage.get({ profiles: [] });
         
-        // Decrypt tokens after loading
         const decryptedProfiles = [];
         for (const profile of data.profiles) {
-            try {
-                const decryptedToken = await decrypt(profile.token, sessionKey);
-                decryptedProfiles.push({ ...profile, token: decryptedToken });
-            } catch (e) {
-                showNotification("Failed to decrypt a profile. Check password.", 4000);
-                // Keep the encrypted token so it's not lost on re-save
-                decryptedProfiles.push(profile); 
-            }
+            const decryptedToken = await decrypt(profile.token, sessionKey);
+            decryptedProfiles.push({ ...profile, token: decryptedToken });
         }
         profiles = decryptedProfiles;
 
@@ -245,17 +235,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // --- FIX: Encrypt the token before saving ---
         const encryptedToken = await encrypt(token, sessionKey);
 
         const profileData = {
             id: editingProfileIdInput.value || `profile_${Date.now()}`,
             name,
             address,
-            token: encryptedToken, // Save the encrypted token
+            token: encryptedToken,
         };
 
-        // We need to load the raw (encrypted) profiles from storage to modify them
         const rawData = await storage.get({ profiles: [] });
         const rawProfiles = rawData.profiles;
         const existingIndex = rawProfiles.findIndex(p => p.id === profileData.id);
@@ -267,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         await storage.set({ profiles: rawProfiles });
-        await loadProfiles(); // Reloads and decrypts profiles for the UI
+        await loadProfiles();
         profileSelect.value = profileData.id;
         updateFormForSelectedProfile();
         closeProfileModal();
@@ -308,7 +296,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- FIX: Password Handling ---
+    // --- Password Handling ---
     async function handleUnlock() {
         const password = passwordInput.value;
         if (!password) {
@@ -317,22 +305,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         passwordError.textContent = "";
 
-        let { salt } = await storage.get("salt");
-        if (!salt) {
-            // First time use: generate and store a salt
-            salt = crypto.getRandomValues(new Uint8Array(16));
-            await storage.set({ salt: Array.from(salt) }); // Store salt as an array of numbers
-        } else {
-            salt = new Uint8Array(salt); // Convert stored array back to Uint8Array
-        }
+        let { salt, check } = await storage.get(["salt", "check"]);
         
-        try {
-            sessionKey = await deriveKey(password, salt);
+        if (!salt || !check) {
+            // First time setup: create salt, derive key, encrypt a check value, and store them.
+            const newSalt = crypto.getRandomValues(new Uint8Array(16));
+            const newKey = await deriveKey(password, newSalt);
+            const newCheck = await encrypt("marionette-check", newKey);
+
+            await storage.set({ 
+                salt: Array.from(newSalt),
+                check: newCheck
+            });
+            sessionKey = newKey;
             passwordModal.classList.remove('visible');
-            await loadProfiles(); // Load profiles now that we have the key
-        } catch (e) {
-            console.error("Key derivation failed:", e);
-            passwordError.textContent = "Failed to derive key.";
+            await loadProfiles();
+        } else {
+            // Existing user: verify password by deriving key and decrypting the check value.
+            const storedSalt = new Uint8Array(salt);
+            const derivedKey = await deriveKey(password, storedSalt);
+            try {
+                const decryptedCheck = await decrypt(check, derivedKey);
+                if (decryptedCheck === "marionette-check") {
+                    sessionKey = derivedKey;
+                    passwordModal.classList.remove('visible');
+                    await loadProfiles();
+                } else {
+                    passwordError.textContent = "Incorrect password.";
+                }
+            } catch (e) {
+                passwordError.textContent = "Incorrect password.";
+            }
         }
     }
 
@@ -374,7 +377,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Initial Load ---
     async function initialize() {
-        // Don't load profiles immediately. Wait for unlock.
         passwordModal.classList.add('visible');
         passwordInput.focus();
 
