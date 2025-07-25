@@ -59,7 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
             {
                 name: "PBKDF2",
                 salt: salt,
-                iterations: 100000,
+                // FIX: Reduced iterations for better performance.
+                // 100,000 is a strong default but can be too slow on some machines.
+                // 25,000 is a compromise for responsiveness.
+                iterations: 25000,
                 hash: "SHA-256",
             },
             baseKey,
