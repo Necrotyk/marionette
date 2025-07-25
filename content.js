@@ -51,24 +51,6 @@ function injectScript() {
     }
 }
 
-
-// Injects the injector.js script into the main page's context with the nonce
-function injectScript() {
-    try {
-        const script = document.createElement('script');
-        script.src = chrome.runtime.getURL('injector.js');
-        script.setAttribute('data-marionette-nonce', MARIONETTE_NONCE);
-        (document.head || document.documentElement).appendChild(script);
-        script.onload = () => {
-            script.remove();
-            chrome.runtime.sendMessage({ type: 'get-connection-status' });
-        };
-        console.log("Marionette Companion: Injector script loaded into page context.");
-    } catch (e) {
-        console.error("Marionette Companion: Error injecting script.", e);
-    }
-}
-
 // Generate a random nonce for secure communication
 function generateNonce() {
     // 128-bit random nonce as a hex string
