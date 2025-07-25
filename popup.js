@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const disconnectBtn = document.getElementById('disconnect-btn');
     const statusDiv = document.getElementById('status');
     const serverAddressInput = document.getElementById('server-address');
-    const authTokenInput = document.getElementById('auth-token'); // Corrected ID from original HTML
+    const authTokenInput = document.getElementById('auth-token');
     const profileSelect = document.getElementById('profile-select');
 
     // Profile Management Buttons
@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const editProfileBtn = document.getElementById('edit-profile-btn');
     const deleteProfileBtn = document.getElementById('delete-profile-btn');
 
-    // Modal Elements
+    // Profile Modal Elements
     const profileFormModal = document.getElementById('profile-form-modal');
     const profileFormTitle = document.getElementById('profile-form-title');
     const saveProfileBtn = document.getElementById('save-profile-btn');
@@ -21,6 +21,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const profileNameInput = document.getElementById('profile-name');
     const profileAddressInput = document.getElementById('profile-address');
     const profileTokenInput = document.getElementById('profile-token');
+
+    // --- FIX: Master Password Modal Elements ---
+    const passwordModal = document.getElementById('password-modal');
+    const passwordInput = document.getElementById('master-password');
+    const unlockBtn = document.getElementById('unlock-btn');
+    const passwordError = document.getElementById('password-error');
     
     // Notification Element
     const notificationArea = document.getElementById('notification-area');
@@ -28,12 +34,95 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let profiles = [];
     let currentStatus = 'disconnected';
+    // --- FIX: Session key, held only in memory ---
+    let sessionKey = null; 
 
-    // SECURITY FIX: Use chrome.storage.session instead of chrome.storage.local.
-    // This ensures API keys are not persisted to disk, mitigating theft from a
-    // compromised machine. The trade-off is that profiles must be re-created
-    // if the browser is fully closed.
-    const storage = chrome.storage.session;
+    const storage = chrome.storage.local;
+
+    // --- FIX: Crypto Helper Functions ---
+
+    /**
+     * Derives a cryptographic key from a user password and a salt.
+     * @param {string} password The user's master password.
+     * @param {Uint8Array} salt A random salt.
+     * @returns {Promise<CryptoKey>} A key suitable for AES-GCM.
+     */
+    async function deriveKey(password, salt) {
+        const enc = new TextEncoder();
+        const baseKey = await crypto.subtle.importKey(
+            "raw",
+            enc.encode(password),
+            { name: "PBKDF2" },
+            false,
+            ["deriveKey"]
+        );
+        return crypto.subtle.deriveKey(
+            {
+                name: "PBKDF2",
+                salt: salt,
+                iterations: 100000,
+                hash: "SHA-256",
+            },
+            baseKey,
+            { name: "AES-GCM", length: 256 },
+            true,
+            ["encrypt", "decrypt"]
+        );
+    }
+
+    /**
+     * Encrypts a string using the derived session key.
+     * @param {string} data The plaintext string to encrypt.
+     * @param {CryptoKey} key The AES-GCM key.
+     * @returns {Promise<string>} A base64-encoded string containing the IV and ciphertext.
+     */
+    async function encrypt(data, key) {
+        if (!key) throw new Error("Encryption key is not available.");
+        const enc = new TextEncoder();
+        const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: iv },
+            key,
+            enc.encode(data)
+        );
+
+        // Combine IV and ciphertext and base64 encode for storage
+        const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+        combined.set(iv, 0);
+        combined.set(new Uint8Array(ciphertext), iv.length);
+        return btoa(String.fromCharCode.apply(null, combined));
+    }
+
+    /**
+     * Decrypts a base64-encoded string using the derived session key.
+     * @param {string} encryptedData The base64-encoded encrypted data.
+     * @param {CryptoKey} key The AES-GCM key.
+     * @returns {Promise<string>} The decrypted plaintext string.
+     */
+    async function decrypt(encryptedData, key) {
+        if (!key) throw new Error("Decryption key is not available.");
+        try {
+            const data = atob(encryptedData);
+            const combined = new Uint8Array(data.length);
+            for (let i = 0; i < data.length; i++) {
+                combined[i] = data.charCodeAt(i);
+            }
+
+            const iv = combined.slice(0, 12);
+            const ciphertext = combined.slice(12);
+
+            const decrypted = await crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                ciphertext
+            );
+            return new TextDecoder().decode(decrypted);
+        } catch (e) {
+            console.error("Decryption failed:", e);
+            // Return a specific error string or re-throw to be handled by the caller
+            throw new Error("Decryption failed. Incorrect password?");
+        }
+    }
 
 
     // --- Notification System ---
@@ -48,8 +137,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Profile Management ---
     async function loadProfiles() {
+        if (!sessionKey) {
+            showNotification("Profiles are locked.", 2000);
+            return;
+        }
         const data = await storage.get({ profiles: [] });
-        profiles = data.profiles;
+        
+        // Decrypt tokens after loading
+        const decryptedProfiles = [];
+        for (const profile of data.profiles) {
+            try {
+                const decryptedToken = await decrypt(profile.token, sessionKey);
+                decryptedProfiles.push({ ...profile, token: decryptedToken });
+            } catch (e) {
+                showNotification("Failed to decrypt a profile. Check password.", 4000);
+                // Keep the encrypted token so it's not lost on re-save
+                decryptedProfiles.push(profile); 
+            }
+        }
+        profiles = decryptedProfiles;
+
         profileSelect.innerHTML = '';
         if (profiles.length === 0) {
             profileSelect.innerHTML = '<option>No profiles. Add one.</option>';
@@ -87,11 +194,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openProfileModal(profile = null) {
+        if (!sessionKey) {
+            showNotification("Unlock profiles before editing.", 3000);
+            return;
+        }
         if (profile) {
             profileFormTitle.textContent = 'Edit Profile';
             editingProfileIdInput.value = profile.id;
             profileNameInput.value = profile.name;
-            // Strip protocol and port for user-friendly editing
             profileAddressInput.value = profile.address.replace(/^wss?:\/\//, '').replace(/:\d+$/, '');
             profileTokenInput.value = profile.token;
         } else {
@@ -118,62 +228,61 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        // --- FIX: Stricter URL Validation ---
         try {
-            // Add a temporary protocol to parse schemeless inputs like "localhost"
             if (!/^(ws|wss):\/\//.test(address)) {
                 address = 'wss://' + address;
             }
-            
             const url = new URL(address);
-
-            // Enforce ws or wss protocol
             if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
                 throw new Error('Protocol must be ws:// or wss://');
             }
-
-            // Add default port if not specified
             if (!url.port) {
                 url.port = '9001';
             }
-            
-            // Use the cleaned, valid URL
             address = url.href;
-
         } catch (e) {
             showNotification(`Invalid address: ${e.message}`);
             return;
         }
-        // --- End of Fix ---
+
+        // --- FIX: Encrypt the token before saving ---
+        const encryptedToken = await encrypt(token, sessionKey);
 
         const profileData = {
             id: editingProfileIdInput.value || `profile_${Date.now()}`,
             name,
             address,
-            token,
+            token: encryptedToken, // Save the encrypted token
         };
 
-        const existingIndex = profiles.findIndex(p => p.id === profileData.id);
+        // We need to load the raw (encrypted) profiles from storage to modify them
+        const rawData = await storage.get({ profiles: [] });
+        const rawProfiles = rawData.profiles;
+        const existingIndex = rawProfiles.findIndex(p => p.id === profileData.id);
+
         if (existingIndex > -1) {
-            profiles[existingIndex] = profileData;
+            rawProfiles[existingIndex] = profileData;
         } else {
-            profiles.push(profileData);
+            rawProfiles.push(profileData);
         }
 
-        await storage.set({ profiles });
-        await loadProfiles();
+        await storage.set({ profiles: rawProfiles });
+        await loadProfiles(); // Reloads and decrypts profiles for the UI
         profileSelect.value = profileData.id;
         updateFormForSelectedProfile();
         closeProfileModal();
-        showNotification("Profile saved!");
+        showNotification("Profile saved securely!");
     }
 
 
     async function deleteProfile() {
         if (profiles.length === 0) return;
         const selectedId = profileSelect.value;
-        profiles = profiles.filter(p => p.id !== selectedId);
-        await storage.set({ profiles });
+        
+        const rawData = await storage.get({ profiles: [] });
+        const remainingProfiles = rawData.profiles.filter(p => p.id !== selectedId);
+
+        await storage.set({ profiles: remainingProfiles });
         await loadProfiles();
         updateFormForSelectedProfile();
         showNotification("Profile deleted.");
@@ -199,6 +308,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- FIX: Password Handling ---
+    async function handleUnlock() {
+        const password = passwordInput.value;
+        if (!password) {
+            passwordError.textContent = "Password cannot be empty.";
+            return;
+        }
+        passwordError.textContent = "";
+
+        let { salt } = await storage.get("salt");
+        if (!salt) {
+            // First time use: generate and store a salt
+            salt = crypto.getRandomValues(new Uint8Array(16));
+            await storage.set({ salt: Array.from(salt) }); // Store salt as an array of numbers
+        } else {
+            salt = new Uint8Array(salt); // Convert stored array back to Uint8Array
+        }
+        
+        try {
+            sessionKey = await deriveKey(password, salt);
+            passwordModal.classList.remove('visible');
+            await loadProfiles(); // Load profiles now that we have the key
+        } catch (e) {
+            console.error("Key derivation failed:", e);
+            passwordError.textContent = "Failed to derive key.";
+        }
+    }
+
     // --- Event Listeners ---
     profileSelect.addEventListener('change', updateFormForSelectedProfile);
     addProfileBtn.addEventListener('click', () => openProfileModal());
@@ -211,6 +348,10 @@ document.addEventListener('DOMContentLoaded', () => {
     deleteProfileBtn.addEventListener('click', deleteProfile);
     saveProfileBtn.addEventListener('click', saveProfile);
     cancelProfileBtn.addEventListener('click', closeProfileModal);
+    unlockBtn.addEventListener('click', handleUnlock);
+    passwordInput.addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') handleUnlock();
+    });
 
     connectBtn.addEventListener('click', () => {
         const address = serverAddressInput.value;
@@ -233,18 +374,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Initial Load ---
     async function initialize() {
-        await loadProfiles();
+        // Don't load profiles immediately. Wait for unlock.
+        passwordModal.classList.add('visible');
+        passwordInput.focus();
+
         const state = await chrome.runtime.sendMessage({ type: 'get-connection-status' });
         const status = state.connectionStatus || 'disconnected';
         updateUi(status);
-        
-        if (status === 'connected' && state.serverAddress) {
-            const connectedProfile = profiles.find(p => p.address === state.serverAddress);
-            if(connectedProfile) {
-                profileSelect.value = connectedProfile.id;
-                updateFormForSelectedProfile();
-            }
-        }
     }
 
     initialize();
