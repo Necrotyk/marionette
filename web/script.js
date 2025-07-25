@@ -276,11 +276,19 @@ const WindowManager = {
         windowEl.className = 'app-window';
         windowEl.classList.add(`app-${appId}`);
 
-        let width = '600px', height = '400px';
-        if (appId === 'settings') { width = '450px'; height = '400px'; }
-        if (appId === 'hashing-calculator') { width = '500px'; height = '350px'; }
+        let width = '600px',
+            height = '400px';
+        if (appId === 'settings') {
+            width = '450px';
+            height = '400px';
+        }
+        if (appId === 'hashing-calculator') {
+            width = '500px';
+            height = '350px';
+        }
         if (appId === 'steganography-tool' || appId === 'cryptool' || appId === 'regex-tester' || appId === 'add-webapp-dialog') {
-            width = '500px'; height = '450px';
+            width = '500px';
+            height = '450px';
         }
         windowEl.style.width = width;
         windowEl.style.height = height;
@@ -325,12 +333,29 @@ const WindowManager = {
                 winData.currentPath = data.path || '/';
                 this.setupRemoteFileBrowser(content, winData, windowId);
                 break;
-            case 'settings': content.classList.add('settings-content'); this.setupSettings(content); break;
-            case 'hashing-calculator': content.classList.add('hashing-content'); this.setupHashingCalculator(content); break;
-            case 'steganography-tool': content.classList.add('steganography-content'); this.setupSteganographyTool(content); break;
-            case 'cryptool': content.classList.add('cryptool-content'); this.setupCryptool(content); break;
-            case 'regex-tester': content.classList.add('regex-content'); this.setupRegexTester(content); break;
-            case 'add-webapp-dialog': this.setupAddWebAppDialog(content); break;
+            case 'settings':
+                content.classList.add('settings-content');
+                this.setupSettings(content);
+                break;
+            case 'hashing-calculator':
+                content.classList.add('hashing-content');
+                this.setupHashingCalculator(content);
+                break;
+            case 'steganography-tool':
+                content.classList.add('steganography-content');
+                this.setupSteganographyTool(content);
+                break;
+            case 'cryptool':
+                content.classList.add('cryptool-content');
+                this.setupCryptool(content);
+                break;
+            case 'regex-tester':
+                content.classList.add('regex-content');
+                this.setupRegexTester(content);
+                break;
+            case 'add-webapp-dialog':
+                this.setupAddWebAppDialog(content);
+                break;
         }
 
         windowEl.appendChild(titleBar);
@@ -342,17 +367,29 @@ const WindowManager = {
         this.focusWindow(windowId);
         this.createTaskbarItem(windowId, title);
 
-        titleBar.querySelector('.close-btn').addEventListener('click', (e) => { e.stopPropagation(); this.closeWindow(windowId); });
-        titleBar.querySelector('.minimize-btn').addEventListener('click', (e) => { e.stopPropagation(); this.minimizeWindow(windowId); });
-        titleBar.querySelector('.maximize-btn').addEventListener('click', (e) => { e.stopPropagation(); this.maximizeWindow(windowId); });
+        titleBar.querySelector('.close-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.closeWindow(windowId);
+        });
+        titleBar.querySelector('.minimize-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.minimizeWindow(windowId);
+        });
+        titleBar.querySelector('.maximize-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.maximizeWindow(windowId);
+        });
         windowEl.addEventListener('mousedown', () => this.focusWindow(windowId));
     },
-    
+
     closeWindow(appId) {
         const win = this.windows.get(appId);
         if (win) {
             if (appId.startsWith('remote-terminal')) {
-                dispatchToCompanion({ type: 'shell_close', window_id: appId });
+                dispatchToCompanion({
+                    type: 'shell_close',
+                    window_id: appId
+                });
             }
             win.element.remove();
             this.windows.delete(appId);
@@ -469,7 +506,7 @@ const WindowManager = {
     setupRemoteTerminal(contentEl, windowId) {
         const outputEl = document.createElement('div');
         outputEl.className = 'terminal-output';
-        
+
         const inputLine = document.createElement('div');
         inputLine.className = 'terminal-input-line';
 
@@ -482,7 +519,7 @@ const WindowManager = {
 
         inputLine.appendChild(promptEl);
         inputLine.appendChild(inputEl);
-        
+
         contentEl.appendChild(outputEl);
         contentEl.appendChild(inputLine);
 
@@ -501,20 +538,31 @@ const WindowManager = {
                 const html = promptEl.innerHTML + sanitizeHTML(command) + '<br>';
                 outputEl.insertAdjacentHTML('beforeend', html);
 
-                dispatchToCompanion({ type: 'shell_input', window_id: windowId, data: command + '\n' });
+                dispatchToCompanion({
+                    type: 'shell_input',
+                    window_id: windowId,
+                    data: command + '\n'
+                });
                 promptEl.innerHTML = '';
                 contentEl.scrollTop = contentEl.scrollHeight;
             }
         });
-        
-        dispatchToCompanion({ type: 'shell_create', window_id: windowId });
+
+        dispatchToCompanion({
+            type: 'shell_create',
+            window_id: windowId
+        });
     },
 
     setupRemoteFileBrowser(contentEl, winData, windowId) {
         const path = winData.currentPath;
         contentEl.innerHTML = `<div class="file-browser-nav"><button id="fs-back-btn"><i class="fa-solid fa-arrow-left"></i></button><span>${path}</span></div><div class="file-browser-grid"><p>Loading...</p></div>`;
 
-        dispatchToCompanion({ type: 'fs_ls', path: path, window_id: windowId });
+        dispatchToCompanion({
+            type: 'fs_ls',
+            path: path,
+            window_id: windowId
+        });
 
         contentEl.querySelector('#fs-back-btn').onclick = () => {
             const newPath = path.substring(0, path.lastIndexOf('/'));
@@ -629,10 +677,10 @@ const WindowManager = {
             if (parentDir.children && parentDir.children[part]) {
                 parentDir = parentDir.children[part];
             } else if (parentDir[part]) {
-                 parentDir = parentDir[part];
+                parentDir = parentDir[part];
             }
         });
-        
+
         const file = parentDir.children ? parentDir.children[fileName] : parentDir[fileName];
 
         contentEl.classList.add('editor-container');
@@ -925,7 +973,7 @@ const WindowManager = {
 
                 // Clear previous results
                 outputDiv.innerHTML = '';
-                
+
                 const matches = Array.from(str.matchAll(regex));
 
                 if (matches.length === 0) {
@@ -1059,15 +1107,28 @@ const WindowManager = {
                 if (ua.indexOf("Linux") != -1) os = "Linux";
                 if (ua.indexOf("Android") != -1) os = "Android";
                 if (ua.indexOf("like Mac") != -1) os = "iOS";
-                result = `<div style="display: flex; gap: 10px;"><pre style="color:#FF3333; margin:0;">
+
+                // --- XSS FIX: Use DOM nodes and textContent, not innerHTML ---
+                const container = document.createElement('div');
+                container.style.display = 'flex';
+                container.style.gap = '10px';
+
+                const asciiArt = document.createElement('pre');
+                asciiArt.style.color = '#FF3333';
+                asciiArt.style.margin = '0';
+                asciiArt.textContent = `
         .--.
        |o_o |
        |:_/ |
       //   \\ \\
      (|     | )
     / \\_   _/ \\
-    \\___)=(___/
-</pre><pre style="color:#71C5FF; margin:0;"><b>${desktopSettings.username}@marionette</b>
+    \\___)=(___/`;
+
+                const infoPre = document.createElement('pre');
+                infoPre.style.color = '#71C5FF';
+                infoPre.style.margin = '0';
+                infoPre.innerHTML = `<b>${sanitizeHTML(desktopSettings.username)}@marionette</b>
 -----------------
 <b>OS</b>: ${os}
 <b>Host</b>: Browser VM 1.0
@@ -1075,9 +1136,12 @@ const WindowManager = {
 <b>Browser</b>: ${navigator.vendor}
 <b>Resolution</b>: ${screen.width}x${screen.height}
 <b>CPU</b>: ${navigator.hardwareConcurrency}
-<b>Language</b>: ${navigator.language}
-</pre></div>`;
-                break;
+<b>Language</b>: ${navigator.language}`;
+
+                container.appendChild(asciiArt);
+                container.appendChild(infoPre);
+                outputEl.appendChild(container);
+                return; // Return early as we've already appended the result
             default:
                 result = `bash: command not found: ${command}`;
         }
@@ -1315,12 +1379,16 @@ function setupPanelMenus() {
 
     document.getElementById('places-home').addEventListener('click', (e) => {
         e.stopPropagation();
-        WindowManager.createWindow('file-browser', 'Home', { path: WindowManager.getUserHomePath() });
+        WindowManager.createWindow('file-browser', 'Home', {
+            path: WindowManager.getUserHomePath()
+        });
         menuButtons.forEach(b => b.classList.remove('menu-open'));
     });
     document.getElementById('places-desktop').addEventListener('click', (e) => {
         e.stopPropagation();
-        WindowManager.createWindow('file-browser', 'Desktop', { path: WindowManager.getUserDesktopPath() });
+        WindowManager.createWindow('file-browser', 'Desktop', {
+            path: WindowManager.getUserDesktopPath()
+        });
         menuButtons.forEach(b => b.classList.remove('menu-open'));
     });
 
@@ -1411,15 +1479,30 @@ function initializeDesktop() {
                     [desktopSettings.username]: {
                         type: 'folder',
                         children: {
-                            'Desktop': { type: 'folder', children: {} },
-                            'Documents': { type: 'folder', children: {} },
+                            'Desktop': {
+                                type: 'folder',
+                                children: {}
+                            },
+                            'Documents': {
+                                type: 'folder',
+                                children: {}
+                            },
                         }
                     }
                 }
             },
-            bin: { type: 'folder', children: {} },
-            etc: { type: 'folder', children: {} },
-            usr: { type: 'folder', children: {} },
+            bin: {
+                type: 'folder',
+                children: {}
+            },
+            etc: {
+                type: 'folder',
+                children: {}
+            },
+            usr: {
+                type: 'folder',
+                children: {}
+            },
         };
         const homeIcon = createDesktopIcon("Home", "folder");
         homeIcon.style.top = '20px';
@@ -1658,7 +1741,13 @@ function setupCompanionListeners() {
 
     // SECURITY FIX: Create a reusable function to escape HTML special characters.
     const escapeHTML = (str) => {
-        return str.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+        return str.replace(/[&<>"']/g, (m) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[m]));
     };
 
     window.addEventListener('marionette-message', (event) => {
@@ -1688,7 +1777,10 @@ function setupCompanionListeners() {
                 break;
 
             case 'shell_output':
-                const { window_id, data } = message;
+                const {
+                    window_id,
+                    data
+                } = message;
                 const winData = WindowManager.windows.get(window_id);
                 if (winData && winData.element) {
                     const outputEl = winData.element.querySelector('.terminal-output');
@@ -1697,7 +1789,7 @@ function setupCompanionListeners() {
 
                     if (outputEl && promptEl) {
                         const cleanedData = data.replace(/\x1b\][0-2];.*?\x07/g, '').replace(/\x1b\[\?2004[hl]/g, '');
-                        
+
                         const lines = cleanedData.split('\n');
                         const newPrompt = lines.pop();
                         const completedLines = lines.join('\n');
@@ -1707,7 +1799,7 @@ function setupCompanionListeners() {
                             const safeHtml = ansi_up.ansi_to_html(escapeHTML(completedLines));
                             outputEl.insertAdjacentHTML('beforeend', safeHtml + '<br>');
                         }
-                        
+
                         // Also sanitize the prompt, which can contain control characters
                         if (newPrompt.includes('\r')) {
                             const parts = newPrompt.split('\r');
@@ -1715,14 +1807,20 @@ function setupCompanionListeners() {
                         } else {
                             promptEl.innerHTML += ansi_up.ansi_to_html(escapeHTML(newPrompt));
                         }
-                        
+
                         contentEl.scrollTop = contentEl.scrollHeight;
                     }
                 }
                 break;
 
             case 'fs_ls_response':
-                const { success, path, content, error, window_id: fs_window_id } = message;
+                const {
+                    success,
+                    path,
+                    content,
+                    error,
+                    window_id: fs_window_id
+                } = message;
                 const fsWindowEl = document.getElementById(`window-${fs_window_id}`);
                 if (!fsWindowEl) return;
 
