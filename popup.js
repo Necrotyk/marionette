@@ -142,8 +142,13 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const decryptedProfiles = [];
         for (const profile of data.profiles) {
-            const decryptedToken = await decrypt(profile.token, sessionKey);
-            decryptedProfiles.push({ ...profile, token: decryptedToken });
+            try {
+                const decryptedToken = await decrypt(profile.token, sessionKey);
+                decryptedProfiles.push({ ...profile, token: decryptedToken });
+            } catch (e) {
+                 console.error(`Failed to decrypt profile "${profile.name}". It may be corrupt or was saved with a different password.`);
+                 // Intentionally skip adding the profile to avoid showing encrypted data or breaking the UI.
+            }
         }
         profiles = decryptedProfiles;
 
@@ -304,28 +309,33 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         passwordError.textContent = "";
+        unlockBtn.disabled = true;
+        unlockBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Unlocking...';
 
-        let { salt, check } = await storage.get(["salt", "check"]);
-        
-        if (!salt || !check) {
-            // First time setup: create salt, derive key, encrypt a check value, and store them.
-            const newSalt = crypto.getRandomValues(new Uint8Array(16));
-            const newKey = await deriveKey(password, newSalt);
-            const newCheck = await encrypt("marionette-check", newKey);
+        try {
+            let { salt, check } = await storage.get(["salt", "check"]);
+            
+            if (!salt || !check) {
+                // First time setup: create salt, derive key, encrypt a check value, and store them.
+                const newSalt = crypto.getRandomValues(new Uint8Array(16));
+                const newKey = await deriveKey(password, newSalt);
+                const newCheck = await encrypt("marionette-check", newKey);
 
-            await storage.set({ 
-                salt: Array.from(newSalt),
-                check: newCheck
-            });
-            sessionKey = newKey;
-            passwordModal.classList.remove('visible');
-            await loadProfiles();
-        } else {
-            // Existing user: verify password by deriving key and decrypting the check value.
-            const storedSalt = new Uint8Array(salt);
-            const derivedKey = await deriveKey(password, storedSalt);
-            try {
+                await storage.set({ 
+                    salt: Array.from(newSalt),
+                    check: newCheck
+                });
+
+                sessionKey = newKey;
+                passwordModal.classList.remove('visible');
+                showNotification("Password set successfully!", 2000);
+                await loadProfiles();
+            } else {
+                // Existing user: verify password by deriving key and decrypting the check value.
+                const storedSalt = new Uint8Array(salt);
+                const derivedKey = await deriveKey(password, storedSalt);
                 const decryptedCheck = await decrypt(check, derivedKey);
+
                 if (decryptedCheck === "marionette-check") {
                     sessionKey = derivedKey;
                     passwordModal.classList.remove('visible');
@@ -333,9 +343,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     passwordError.textContent = "Incorrect password.";
                 }
-            } catch (e) {
-                passwordError.textContent = "Incorrect password.";
             }
+        } catch (e) {
+            console.error("Unlock failed:", e);
+            passwordError.textContent = "Incorrect password. Please try again.";
+        } finally {
+            unlockBtn.disabled = false;
+            unlockBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock';
         }
     }
 
