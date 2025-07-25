@@ -118,13 +118,33 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        // Add default protocol and port if not specified
-        if (!address.startsWith('ws://') && !address.startsWith('wss://')) {
-            address = 'wss://' + address;
+        // --- FIX: Stricter URL Validation ---
+        try {
+            // Add a temporary protocol to parse schemeless inputs like "localhost"
+            if (!/^(ws|wss):\/\//.test(address)) {
+                address = 'wss://' + address;
+            }
+            
+            const url = new URL(address);
+
+            // Enforce ws or wss protocol
+            if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
+                throw new Error('Protocol must be ws:// or wss://');
+            }
+
+            // Add default port if not specified
+            if (!url.port) {
+                url.port = '9001';
+            }
+            
+            // Use the cleaned, valid URL
+            address = url.href;
+
+        } catch (e) {
+            showNotification(`Invalid address: ${e.message}`);
+            return;
         }
-        if (!/:\d+$/.test(address)) {
-            address += ':9001';
-        }
+        // --- End of Fix ---
 
         const profileData = {
             id: editingProfileIdInput.value || `profile_${Date.now()}`,
@@ -147,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
         closeProfileModal();
         showNotification("Profile saved!");
     }
+
 
     async function deleteProfile() {
         if (profiles.length === 0) return;
