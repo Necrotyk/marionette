@@ -2,19 +2,24 @@
 // The logic is designed to handle reconnection when needed.
 let socket = null;
 
+// --- FIX: Track the active tab ---
+// This will hold the ID of the tab running the Marionette UI.
+let activeMarionetteTabId = null;
+
 // Use chrome.storage.session for non-persistent state if available, otherwise fall back to local.
 const storageArea = chrome.storage.session || chrome.storage.local;
 
 // --- SECURITY ENHANCEMENT ---
 // An allowlist of message types that are permitted to be sent from the
 // content script (and by extension, the web UI) to the WebSocket agent.
-// This prevents compromised page scripts from sending arbitrary commands.
 const ALLOWED_MESSAGE_TYPES = new Set([
     'shell_create',
     'shell_input',
     'shell_resize',
     'shell_close',
-    'fs_ls'
+    'fs_ls',
+    // --- FIX: Add a message type for the UI to identify itself ---
+    'marionette_ui_ready' 
 ]);
 
 // Function to get the current connection state from storage
@@ -32,15 +37,14 @@ async function updateStatus(status, address = '', token = '') {
     // Notify the popup
     await chrome.runtime.sendMessage({ type: 'statusUpdate', status }).catch(e => {});
     
-    // Notify all content scripts
-    const tabs = await chrome.tabs.query({ /* all tabs */ });
-    for (const tab of tabs) {
-        try {
-            // Use a more specific message type to avoid conflicts
-            await chrome.tabs.sendMessage(tab.id, { type: status === 'connected' ? 'marionette-connected' : 'marionette-disconnected' });
-        } catch (e) {
-            // This can happen if the content script is not injected in a tab, which is fine.
-        }
+    // --- FIX: Only notify the active Marionette tab ---
+    if (activeMarionetteTabId) {
+        const messageType = status === 'connected' ? 'marionette-connected' : 'marionette-disconnected';
+        chrome.tabs.sendMessage(activeMarionetteTabId, { type: messageType }).catch(e => {
+            // If sending fails, the tab might have closed.
+            console.log("Could not send status to tab, it may have closed.", e);
+            activeMarionetteTabId = null;
+        });
     }
     console.log(`Status updated to: ${status}`);
 }
@@ -57,7 +61,6 @@ function connectWebSocket(address, token) {
 
     socket.onopen = () => {
         console.log("WebSocket opened. Sending authentication token.");
-        // Use a structured object for auth, consistent with other messages
         socket.send(JSON.stringify({ type: "auth", token: token }));
     };
 
@@ -72,12 +75,13 @@ function connectWebSocket(address, token) {
                 console.log("Authentication failed.");
                 socket.close(1000, "Authentication Failed");
             } else {
-                // Forward all other messages to all relevant tabs
-                chrome.tabs.query({}).then(tabs => {
-                    tabs.forEach(tab => {
-                         chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+                // --- FIX: Forward all other messages ONLY to the active tab ---
+                if (activeMarionetteTabId) {
+                    chrome.tabs.sendMessage(activeMarionetteTabId, message).catch((e) => {
+                        console.error("Failed to send message to Marionette tab:", e);
+                        activeMarionetteTabId = null; // Assume tab is closed
                     });
-                });
+                }
             }
         } catch (e) {
             console.error("Error parsing message from server:", e);
@@ -87,20 +91,16 @@ function connectWebSocket(address, token) {
     socket.onclose = (event) => {
         console.log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
         socket = null;
-        // Pass the reason for disconnection for better error reporting in the UI
         const reason = event.reason === "Authentication Failed" ? "auth_fail" : "generic";
         updateStatus('disconnected', '', '', reason);
     };
 
     socket.onerror = (error) => {
         console.error("WebSocket error:", error);
-        // The onclose event will usually fire immediately after this.
         const errorMessage = { type: 'marionette-error', message: 'WebSocket connection failed.' };
-         chrome.tabs.query({}).then(tabs => {
-            tabs.forEach(tab => {
-                 chrome.tabs.sendMessage(tab.id, errorMessage).catch(() => {});
-            });
-        });
+         if (activeMarionetteTabId) {
+            chrome.tabs.sendMessage(activeMarionetteTabId, errorMessage).catch(() => {});
+        }
     };
 }
 
@@ -109,34 +109,44 @@ function disconnectWebSocket() {
         console.log("User initiated disconnect.");
         socket.close(1000, "User initiated disconnect");
     }
-    // Ensure status is updated even if socket was already null
     updateStatus('disconnected');
 }
 
 // Listener for messages from the popup or content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // Internal extension messages for connection management
+    // --- FIX: Handle UI identification message ---
+    if (message.type === 'marionette_ui_ready') {
+        if (sender.tab) {
+            activeMarionetteTabId = sender.tab.id;
+            console.log(`Marionette UI is active in tab ID: ${activeMarionetteTabId}`);
+            // When a new UI connects, send it the current status.
+            getConnectionState().then(state => {
+                 const messageType = state.connectionStatus === 'connected' ? 'marionette-connected' : 'marionette-disconnected';
+                 chrome.tabs.sendMessage(activeMarionetteTabId, { type: messageType }).catch(()=>{});
+            });
+        }
+        return;
+    }
+
     if (message.type === 'connect') {
         connectWebSocket(message.address, message.token);
-        return; // Do not process further
+        return;
     } 
     if (message.type === 'disconnect') {
         disconnectWebSocket();
-        return; // Do not process further
+        return;
+
     } 
     if (message.type === 'get-connection-status') {
         getConnectionState().then(state => sendResponse(state));
         return true; // Indicates an async response
     }
 
-    // --- SECURITY FIX: Validate messages before sending to WebSocket ---
     if (socket && socket.readyState === WebSocket.OPEN) {
-        // Check if the message type is in our allowlist.
         if (typeof message.type === 'string' && ALLOWED_MESSAGE_TYPES.has(message.type)) {
             console.log("BACKGROUND SEND ->", message.type);
             socket.send(JSON.stringify(message));
         } else {
-            // If the message type is not allowed, reject it.
             console.warn("Rejected untrusted/unknown message type from extension context:", message);
         }
     } else {
@@ -144,14 +154,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
+// --- FIX: Add a listener for when a tab is closed ---
+chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    if (tabId === activeMarionetteTabId) {
+        console.log(`Marionette tab ${tabId} has been closed.`);
+        activeMarionetteTabId = null;
+        // Optional: you might want to disconnect the WebSocket session here
+        // disconnectWebSocket(); 
+    }
+});
+
+
 // Attempt to reconnect on service worker startup if we were previously connected
 chrome.runtime.onStartup.addListener(async () => {
     console.log("Extension startup.");
-    const state = await getConnectionState();
-    if (state.connectionStatus === 'connected' && state.serverAddress && state.authToken) {
-        console.log("Attempting to reconnect previous session...");
-        connectWebSocket(state.serverAddress, state.authToken);
-    } else {
-        await updateStatus('disconnected');
-    }
+    // Don't auto-reconnect on startup, as we don't know which tab is the right one.
+    // The UI will send 'marionette_ui_ready' when it loads.
+    await updateStatus('disconnected');
 });
