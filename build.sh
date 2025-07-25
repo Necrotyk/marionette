@@ -81,7 +81,12 @@ build_for_browser() {
       # Convert action to browser_action
       .browser_action = .action | del(.action) |
       # Merge host_permissions into permissions for MV2
-      .permissions = (.permissions + .host_permissions | unique) | del(.host_permissions) |
+      .permissions = (.permissions + .host_permissions | unique) |
+      # FIX: Convert invalid MV3 URL match patterns to valid MV2 patterns
+      .permissions |= map(if type == "string" then gsub(":\\*\\/"; "/") | gsub(":\\*\\/\\*"; "/*") else . end) |
+      .content_scripts[].matches |= map(gsub(":\\*\\/\\*"; "/*")) |
+      # Clean up
+      del(.host_permissions) |
       # Remove MV3-only permissions and keys that are invalid in MV2
       .permissions -= ["declarativeNetRequest", "scripting"] |
       del(.declarative_net_request) |
