@@ -88,7 +88,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const combined = new Uint8Array(iv.length + ciphertext.byteLength);
         combined.set(iv, 0);
         combined.set(new Uint8Array(ciphertext), iv.length);
-        return btoa(String.fromCharCode.apply(null, combined));
+        
+        let binary = '';
+        for (let i = 0; i < combined.byteLength; i++) {
+            binary += String.fromCharCode(combined[i]);
+        }
+        return btoa(binary);
     }
 
     /**
@@ -99,26 +104,22 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     async function decrypt(encryptedData, key) {
         if (!key) throw new Error("Decryption key is not available.");
-        try {
-            const data = atob(encryptedData);
-            const combined = new Uint8Array(data.length);
-            for (let i = 0; i < data.length; i++) {
-                combined[i] = data.charCodeAt(i);
-            }
-
-            const iv = combined.slice(0, 12);
-            const ciphertext = combined.slice(12);
-
-            const decrypted = await crypto.subtle.decrypt(
-                { name: "AES-GCM", iv: iv },
-                key,
-                ciphertext
-            );
-            return new TextDecoder().decode(decrypted);
-        } catch (e) {
-            console.error("Decryption failed:", e);
-            throw new Error("Decryption failed. Incorrect password?");
+        
+        const binaryString = atob(encryptedData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
         }
+
+        const iv = bytes.slice(0, 12);
+        const ciphertext = bytes.slice(12);
+
+        const decrypted = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: iv },
+            key,
+            ciphertext
+        );
+        return new TextDecoder().decode(decrypted);
     }
 
 
@@ -310,13 +311,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         passwordError.textContent = "";
         unlockBtn.disabled = true;
-        unlockBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Unlocking...';
+        unlockBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Working...';
 
-        try {
-            let { salt, check } = await storage.get(["salt", "check"]);
-            
-            if (!salt || !check) {
-                // First time setup: create salt, derive key, encrypt a check value, and store them.
+        // Use a brief timeout to allow the UI to update to the "Working..." state.
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        let { salt, check } = await storage.get(["salt", "check"]);
+
+        if (!salt || !check) {
+            // --- First Time Setup ---
+            try {
                 const newSalt = crypto.getRandomValues(new Uint8Array(16));
                 const newKey = await deriveKey(password, newSalt);
                 const newCheck = await encrypt("marionette-check", newKey);
@@ -330,8 +334,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 passwordModal.classList.remove('visible');
                 showNotification("Password set successfully!", 2000);
                 await loadProfiles();
-            } else {
-                // Existing user: verify password by deriving key and decrypting the check value.
+            } catch (e) {
+                console.error("Password SETUP failed:", e);
+                passwordError.textContent = "Failed to set password. Please try again.";
+            } finally {
+                unlockBtn.disabled = false;
+                unlockBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock';
+            }
+        } else {
+            // --- Existing User Verification ---
+            try {
                 const storedSalt = new Uint8Array(salt);
                 const derivedKey = await deriveKey(password, storedSalt);
                 const decryptedCheck = await decrypt(check, derivedKey);
@@ -341,15 +353,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     passwordModal.classList.remove('visible');
                     await loadProfiles();
                 } else {
-                    passwordError.textContent = "Incorrect password.";
+                    // This path is unlikely as decrypt should throw, but it's a safe fallback.
+                    throw new Error("Check value mismatch");
                 }
+            } catch (e) {
+                console.error("Password VERIFICATION failed:", e);
+                passwordError.textContent = "Incorrect password.";
+            } finally {
+                unlockBtn.disabled = false;
+                unlockBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock';
             }
-        } catch (e) {
-            console.error("Unlock failed:", e);
-            passwordError.textContent = "Incorrect password. Please try again.";
-        } finally {
-            unlockBtn.disabled = false;
-            unlockBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock';
         }
     }
 
